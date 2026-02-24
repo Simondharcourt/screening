@@ -65,12 +65,20 @@ function RootComponent() {
                                 </button>
                             </>
                         ) : (
-                            <Link
-                                to="/"
-                                className="px-4 py-1.5 text-sm font-medium text-white bg-surface-900 hover:bg-surface-800 rounded-lg shadow-sm transition-colors"
-                            >
-                                Connexion
-                            </Link>
+                            <>
+                                <Link
+                                    to="/jobs"
+                                    className="px-4 py-1.5 text-sm font-medium text-gray-600 hover:text-primary-600 transition-colors"
+                                >
+                                    Offres d'emploi
+                                </Link>
+                                <Link
+                                    to="/"
+                                    className="px-4 py-1.5 text-sm font-medium text-white bg-surface-900 hover:bg-surface-800 rounded-lg shadow-sm transition-colors"
+                                >
+                                    Espace Recruteur
+                                </Link>
+                            </>
                         )}
                     </nav>
                 </div>
