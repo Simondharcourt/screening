@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
+    
+    # Vapi Settings
+    VAPI_API_KEY: str = ""
+    VAPI_PHONE_NUMBER_ID: str = ""
+    WEBHOOK_URL: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

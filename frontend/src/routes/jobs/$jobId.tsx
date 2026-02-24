@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { jobsApi } from '../../api/jobs'
 import { candidatesApi } from '../../api/candidates'
 import { matchingApi } from '../../api/matching'
+import { vapiApi } from '../../api/vapi'
 
 export const Route = createFileRoute('/jobs/$jobId')({
     component: JobDetail,
@@ -15,6 +16,12 @@ function JobDetail() {
     const [showAddModal, setShowAddModal] = useState(false)
     const [analyzingCandidate, setAnalyzingCandidate] = useState<string | null>(null)
     const [scoreModalData, setScoreModalData] = useState<{ score: number, justification: string } | null>(null)
+
+    // Vapi States
+    const [callingCandidate, setCallingCandidate] = useState<string | null>(null)
+    const [transcriptModalData, setTranscriptModalData] = useState<{ name: string, transcript: string, status: string } | null>(null)
+    const [phoneInputCandidate, setPhoneInputCandidate] = useState<{ id: string, screeningId: string, name: string } | null>(null)
+    const [phoneNumber, setPhoneNumber] = useState('+33600000000')
 
     const scoreMutation = useMutation({
         mutationFn: matchingApi.scoreCandidate,
@@ -32,6 +39,28 @@ function JobDetail() {
     const handleAnalyze = (candidateId: string) => {
         setAnalyzingCandidate(candidateId)
         scoreMutation.mutate({ job_id: jobId, candidate_id: candidateId })
+    }
+
+    const callMutation = useMutation({
+        mutationFn: ({ screeningId, phone }: { screeningId: string, phone: string }) => vapiApi.triggerCall(screeningId, phone),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['candidates', jobId] })
+            setPhoneInputCandidate(null)
+            setCallingCandidate(null)
+            alert('Appel Vapi déclenché avec succès !')
+        },
+        onError: (err: any) => {
+            alert(err.message || 'Erreur lors de l\'appel')
+            setCallingCandidate(null)
+        }
+    })
+
+    const handleCallSubmit = (e: React.FormEvent) => {
+        e.preventDefault()
+        if (phoneInputCandidate) {
+            setCallingCandidate(phoneInputCandidate.id)
+            callMutation.mutate({ screeningId: phoneInputCandidate.screeningId, phone: phoneNumber })
+        }
     }
 
     const { data: job, isLoading: jobLoading } = useQuery({
@@ -124,6 +153,7 @@ function JobDetail() {
                                             <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-0">Nom</th>
                                             <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Statut</th>
                                             <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Score de Compatibilité</th>
+                                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Appel IA (Vapi)</th>
                                             <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">CV</th>
                                         </tr>
                                     </thead>
@@ -166,6 +196,32 @@ function JobDetail() {
                                                     )}
                                                 </td>
                                                 <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                                                    {wrapper.screening.transcript ? (
+                                                        <button
+                                                            onClick={() => setTranscriptModalData({
+                                                                name: wrapper.candidate.name,
+                                                                transcript: wrapper.screening.transcript!,
+                                                                status: wrapper.screening.call_status!
+                                                            })}
+                                                            className="text-blue-600 hover:text-blue-900 font-medium"
+                                                        >
+                                                            Voir l'entretien
+                                                        </button>
+                                                    ) : wrapper.screening.call_status === 'calling' || wrapper.screening.call_status === 'in-progress' || wrapper.screening.call_status === 'ringing' ? (
+                                                        <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                                                            Appel en cours...
+                                                        </span>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => setPhoneInputCandidate({ id: wrapper.candidate.id, screeningId: wrapper.screening.id, name: wrapper.candidate.name })}
+                                                            disabled={callingCandidate === wrapper.candidate.id}
+                                                            className="text-indigo-600 hover:text-indigo-900 font-medium disabled:opacity-50 flex items-center gap-1"
+                                                        >
+                                                            📞 Envoyer l'IA
+                                                        </button>
+                                                    )}
+                                                </td>
+                                                <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                                                     {wrapper.candidate.cv_url ? (
                                                         <a href={wrapper.candidate.cv_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:text-blue-900 underline">
                                                             Voir
@@ -204,6 +260,69 @@ function JobDetail() {
                                 </div>
                                 <div className="mt-5 sm:mt-6">
                                     <button type="button" onClick={() => setScoreModalData(null)} className="inline-flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">Fermer</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Phone Input Modal for Vapi */}
+            {phoneInputCandidate && (
+                <div className="relative z-10" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"></div>
+                    <div className="fixed inset-0 z-10 w-screen overflow-y-auto">
+                        <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                            <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-md sm:p-6">
+                                <form onSubmit={handleCallSubmit}>
+                                    <h3 className="text-lg font-semibold leading-6 text-gray-900">Appeler {phoneInputCandidate.name}</h3>
+                                    <div className="mt-4">
+                                        <label className="block text-sm font-medium text-gray-700">Numéro de téléphone final (format +33...)</label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={phoneNumber}
+                                            onChange={e => setPhoneNumber(e.target.value)}
+                                            className="mt-1 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600 sm:text-sm"
+                                            placeholder="+33612345678"
+                                        />
+                                        <p className="mt-2 text-xs text-gray-500">L'Agent IA Vocale Vapi va démarrer un appel immédiatement vers ce numéro concernant l'offre actuelle.</p>
+                                    </div>
+                                    <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
+                                        <button type="submit" disabled={callMutation.isPending} className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:col-start-2 disabled:opacity-50">
+                                            {callMutation.isPending ? 'Lancement...' : 'Appeler'}
+                                        </button>
+                                        <button type="button" onClick={() => setPhoneInputCandidate(null)} className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0">
+                                            Annuler
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Transcript Modal */}
+            {transcriptModalData && (
+                <div className="relative z-10" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"></div>
+                    <div className="fixed inset-0 z-10 w-screen overflow-y-auto">
+                        <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                            <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-2xl sm:p-6">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-lg font-semibold leading-6 text-gray-900">Entretien: {transcriptModalData.name}</h3>
+                                    <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                                        Terminé
+                                    </span>
+                                </div>
+                                <div className="mt-2 max-h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-100">
+                                    <p className="text-sm text-gray-700 whitespace-pre-wrap font-mono">{transcriptModalData.transcript}</p>
+                                </div>
+                                <div className="mt-5 sm:mt-6">
+                                    <button type="button" onClick={() => setTranscriptModalData(null)} className="inline-flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                                        Fermer
+                                    </button>
                                 </div>
                             </div>
                         </div>

@@ -29,6 +29,8 @@ class ScreeningResponse(BaseModel):
     status: str
     compatibility_score: Optional[int] = None
     performance_score: Optional[int] = None
+    call_status: Optional[str] = "not_started"
+    transcript: Optional[str] = None
     created_at: datetime
 
     class Config:

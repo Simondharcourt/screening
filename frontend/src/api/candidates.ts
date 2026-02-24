@@ -18,6 +18,8 @@ export interface Screening {
     status: 'pending' | 'scheduled' | 'interviewed' | 'evaluated';
     compatibility_score?: number;
     performance_score?: number;
+    call_status?: string;
+    transcript?: string;
     created_at: string;
 }
 
