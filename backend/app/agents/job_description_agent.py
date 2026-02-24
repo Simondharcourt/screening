@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, TypedDict
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.pydantic_v1 import BaseModel as LangchainBaseModel, Field
+from pydantic import BaseModel as LangchainBaseModel, Field
 from langgraph.graph import StateGraph, END
 import os
 

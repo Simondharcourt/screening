@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, TypedDict, Optional
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.pydantic_v1 import BaseModel as LangchainBaseModel, Field
+from pydantic import BaseModel as LangchainBaseModel, Field
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
