@@ -1,9 +1,26 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 from app.schemas.jobs import JobPostingCreate, JobPostingResponse, JobPostingUpdate
+from app.schemas.ai import JobGenerateRequest, JobGenerateResponse
 from app.services.job_service import JobService
+from app.agents.job_description_agent import job_description_agent
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
+
+@router.post("/generate", response_model=JobGenerateResponse)
+async def generate_job_description(request: JobGenerateRequest):
+    try:
+        # The agent returns the final state dict
+        result = job_description_agent.invoke({
+            "title": request.title,
+            "bullet_points": request.bullet_points
+        })
+        return JobGenerateResponse(
+            description=result["description"],
+            questions=result["questions"]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @router.post("/", response_model=JobPostingResponse)
 async def create_job(job: JobPostingCreate):
