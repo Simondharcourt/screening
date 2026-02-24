@@ -9,6 +9,7 @@ export const Route = createFileRoute('/')({
 
 function HomeComponent() {
     const [email, setEmail] = useState('')
+    const [password, setPassword] = useState('')
     const [loading, setLoading] = useState(false)
     const [message, setMessage] = useState('')
     const [session, setSession] = useState<any>(null)
@@ -32,17 +33,36 @@ function HomeComponent() {
         e.preventDefault()
         setLoading(true)
         setMessage('')
-        const { error } = await supabase.auth.signInWithOtp({
+
+        // Try sign in first
+        let { error } = await supabase.auth.signInWithPassword({
             email,
-            options: {
-                emailRedirectTo: window.location.origin,
-            },
+            password
         })
+
+        // If it fails with Invalid login credentials, try to sign up automatically
+        if (error && error.message.includes('Invalid login credentials')) {
+            const signUpResponse = await supabase.auth.signUp({
+                email,
+                password
+            })
+            error = signUpResponse.error
+
+            if (!error && signUpResponse.data.session) {
+                navigate({ to: '/dashboard' })
+                return
+            } else if (!error && !signUpResponse.data.session) {
+                // Should not happen if confirm email is disabled, but just in case
+                setMessage("Compte créé, vous pouvez vous connecter.")
+                setLoading(false)
+                return
+            }
+        }
 
         if (error) {
             setMessage(error.message)
         } else {
-            setMessage("Un lien magique a été envoyé à votre adresse email. Vérifiez votre boîte de réception !")
+            navigate({ to: '/dashboard' })
         }
         setLoading(false)
     }
@@ -160,17 +180,34 @@ function HomeComponent() {
                                         </div>
                                     </div>
 
+                                    <div className="space-y-2">
+                                        <label htmlFor="password" className="block text-sm font-semibold text-gray-700 ml-1">
+                                            Mot de passe
+                                        </label>
+                                        <div className="relative">
+                                            <input
+                                                id="password"
+                                                type="password"
+                                                required
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                className="block w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition duration-200 shadow-sm outline-none"
+                                                placeholder="••••••••"
+                                            />
+                                        </div>
+                                    </div>
+
                                     <button
                                         type="submit"
                                         disabled={loading}
-                                        className="w-full relative overflow-hidden group bg-surface-900 text-white font-semibold py-3.5 px-4 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed hover:-translate-y-0.5"
+                                        className="w-full relative overflow-hidden group bg-surface-900 text-white font-semibold py-3.5 px-4 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed hover:-translate-y-0.5 mt-2"
                                     >
                                         <div className="absolute inset-0 bg-gradient-to-r from-primary-600 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                                         <div className="relative z-10 flex items-center justify-center gap-2">
                                             {loading ? (
                                                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                             ) : (
-                                                <>Recevoir le lien magique <Sparkles className="w-4 h-4 ml-1" /></>
+                                                <>Se connecter <ArrowRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" /></>
                                             )}
                                         </div>
                                     </button>
