@@ -1,5 +1,6 @@
 from app.core.database import supabase
 from app.schemas.candidates import CandidateCreate
+from app.services.embedding_service import EmbeddingService
 from typing import List, Dict, Any
 import uuid
 
@@ -10,6 +11,9 @@ class CandidateService:
         cand_data = candidate_data.model_dump(exclude={"job_posting_id"})
         if cv_url:
             cand_data["cv_url"] = cv_url
+            
+        text_to_embed = f"{candidate_data.name} {candidate_data.profile_text or ''}"
+        cand_data['embedding'] = EmbeddingService.generate(text_to_embed)
             
         cand_response = supabase.table("candidates").insert(cand_data).execute()
         if not cand_response.data:

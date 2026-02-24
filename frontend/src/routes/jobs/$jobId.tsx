@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { jobsApi } from '../../api/jobs'
 import { candidatesApi } from '../../api/candidates'
+import { matchingApi } from '../../api/matching'
 
 export const Route = createFileRoute('/jobs/$jobId')({
     component: JobDetail,
@@ -12,6 +13,26 @@ function JobDetail() {
     const { jobId } = Route.useParams()
     const queryClient = useQueryClient()
     const [showAddModal, setShowAddModal] = useState(false)
+    const [analyzingCandidate, setAnalyzingCandidate] = useState<string | null>(null)
+    const [scoreModalData, setScoreModalData] = useState<{ score: number, justification: string } | null>(null)
+
+    const scoreMutation = useMutation({
+        mutationFn: matchingApi.scoreCandidate,
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({ queryKey: ['candidates', jobId] })
+            setScoreModalData(data)
+            setAnalyzingCandidate(null)
+        },
+        onError: (err: any) => {
+            alert(err.message || 'Erreur lors de l\'analyse')
+            setAnalyzingCandidate(null)
+        }
+    })
+
+    const handleAnalyze = (candidateId: string) => {
+        setAnalyzingCandidate(candidateId)
+        scoreMutation.mutate({ job_id: jobId, candidate_id: candidateId })
+    }
 
     const { data: job, isLoading: jobLoading } = useQuery({
         queryKey: ['job', jobId],
@@ -117,13 +138,32 @@ function JobDetail() {
                                                 </td>
                                                 <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                                                     <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${wrapper.screening.status === 'pending' ? 'bg-yellow-50 text-yellow-800 ring-yellow-600/20' :
-                                                            'bg-gray-50 text-gray-600 ring-gray-500/10'
+                                                        'bg-gray-50 text-gray-600 ring-gray-500/10'
                                                         }`}>
                                                         {wrapper.screening.status}
                                                     </span>
                                                 </td>
                                                 <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                                                    {wrapper.screening.compatibility_score !== null ? `${wrapper.screening.compatibility_score}%` : 'N/A'}
+                                                    {wrapper.screening.compatibility_score !== null ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-semibold text-gray-900">{wrapper.screening.compatibility_score}%</span>
+                                                            <button
+                                                                onClick={() => handleAnalyze(wrapper.candidate.id)}
+                                                                disabled={analyzingCandidate === wrapper.candidate.id}
+                                                                className="text-xs text-blue-600 hover:text-blue-500"
+                                                            >
+                                                                {analyzingCandidate === wrapper.candidate.id ? '(Analyse...)' : '(Réévaluer)'}
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleAnalyze(wrapper.candidate.id)}
+                                                            disabled={analyzingCandidate === wrapper.candidate.id}
+                                                            className="text-blue-600 hover:text-blue-900 font-medium disabled:opacity-50"
+                                                        >
+                                                            {analyzingCandidate === wrapper.candidate.id ? 'Analyse...' : 'Analyser le profil'}
+                                                        </button>
+                                                    )}
                                                 </td>
                                                 <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                                                     {wrapper.candidate.cv_url ? (
@@ -144,6 +184,32 @@ function JobDetail() {
 
             {/* Add Candidate Modal */}
             {showAddModal && <AddCandidateModal jobId={jobId} onClose={() => setShowAddModal(false)} onSuccess={() => queryClient.invalidateQueries({ queryKey: ['candidates', jobId] })} />}
+
+            {/* Score Details Modal */}
+            {scoreModalData && (
+                <div className="relative z-10" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"></div>
+                    <div className="fixed inset-0 z-10 w-screen overflow-y-auto">
+                        <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+                            <div className="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-xl sm:p-6">
+                                <div>
+                                    <h3 className="text-lg font-semibold leading-6 text-gray-900">Résultat de l'analyse IA</h3>
+                                    <div className="mt-4">
+                                        <div className="flex items-center gap-4 mb-4">
+                                            <div className="text-3xl font-bold text-blue-600">{scoreModalData.score}%</div>
+                                            <div className="text-sm font-medium text-gray-500">Score de compatibilité</div>
+                                        </div>
+                                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{scoreModalData.justification}</p>
+                                    </div>
+                                </div>
+                                <div className="mt-5 sm:mt-6">
+                                    <button type="button" onClick={() => setScoreModalData(null)} className="inline-flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">Fermer</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
