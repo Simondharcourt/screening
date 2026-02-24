@@ -16,9 +16,14 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
+from app.routers import jobs, candidates
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to the HR AI Screening Platform API"}
+
+app.include_router(jobs.router)
+app.include_router(candidates.router)
 
 @app.get("/health")
 async def health_check():
