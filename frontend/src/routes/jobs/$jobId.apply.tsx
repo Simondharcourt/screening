@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { ArrowRight, User, Mail, Sparkles } from 'lucide-react'
+import { ArrowRight, User, Mail, Sparkles, Lock } from 'lucide-react'
 
 export const Route = createFileRoute('/jobs/$jobId/apply')({
   component: CandidateApplicationForm,
@@ -11,9 +11,11 @@ function CandidateApplicationForm() {
   const { jobId } = Route.useParams()
   const navigate = useNavigate()
 
+  const [isLogin, setIsLogin] = useState(false)
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -23,50 +25,107 @@ function CandidateApplicationForm() {
     setErrorMsg('')
 
     try {
-      // 1. Check if candidate already exists by email
+      let authUserId: string | undefined;
+
+      if (isLogin) {
+        // LOGIN MODE
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        })
+        if (error) throw new Error("Email ou mot de passe incorrect.")
+        authUserId = data.user?.id;
+      } else {
+        // SIGNUP MODE
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password
+        })
+        // If a user exists as a recruiter, they can't sign up again here, they should log in.
+        // We'll let Supabase handle the "User already registered" error
+        if (error) throw new Error(error.message === "User already registered" ? "Un compte existe déjà. Veuillez vous connecter." : error.message)
+        authUserId = data.user?.id;
+      }
+
+      if (!authUserId) throw new Error("Erreur lors de l'authentification.")
+
+      // Ensure candidate profile exists in DB
       let { data: existingCandidates, error: searchError } = await supabase
         .from('candidates')
         .select('*')
-        .eq('email', email)
+        .eq('user_id', authUserId)
 
       if (searchError) throw searchError;
 
       let candidateId = existingCandidates?.[0]?.id;
 
-      // 2. If not, create candidate
-      if (!candidateId) {
+      // If they don't have a linked candidate profile, create one
+      if (!candidateId && !isLogin) {
         const { data: newCandidate, error: createError } = await supabase
           .from('candidates')
           .insert([{
-            first_name: firstName,
-            last_name: lastName,
-            email: email
+            name: `${firstName} ${lastName}`.trim(),
+            email: email,
+            user_id: authUserId
           }])
           .select()
           .single()
 
-        if (createError) throw createError;
+        if (createError) throw new Error("Erreur lors de la création du profil candidat.")
+        candidateId = newCandidate.id;
+      } else if (!candidateId && isLogin) {
+        // Failsafe: if they logged in but have no candidate profile (e.g. they are a recruiter)
+        // We create one for them so they can apply anyway, using their email as name
+        const { data: newCandidate, error: createError } = await supabase
+          .from('candidates')
+          .insert([{
+            name: email.split('@')[0],
+            email: email,
+            user_id: authUserId
+          }])
+          .select()
+          .single()
+
+        if (createError) throw new Error("Erreur serveur de liaison de profil.")
         candidateId = newCandidate.id;
       }
 
-      // 3. Create screening session
-      const { error: screeningError } = await supabase
+      // Check if screening already exists to avoid duplicates
+      let { data: existingScreening } = await supabase
         .from('screenings')
-        .insert([{
-          job_id: jobId,
-          candidate_id: candidateId,
-          status: 'interviewing'
-        }])
+        .select('id')
+        .eq('job_id', jobId)
+        .eq('candidate_id', candidateId)
+        .single()
 
-      if (screeningError) throw screeningError;
+      let screeningId = existingScreening?.id;
 
-      // 4. Redirect to AI Coach (In a real app, generate a secure token here instead of relying on local storage)
-      localStorage.setItem('coach_session_id', `cand_${candidateId}_job_${jobId}`);
+      if (!screeningId) {
+        // Create screening session
+        const { data: newScreening, error: screeningError } = await supabase
+          .from('screenings')
+          .insert([{
+            job_id: jobId,
+            candidate_id: candidateId,
+            status: 'interviewing'
+          }])
+          .select('id')
+          .single()
+
+        if (screeningError) throw new Error("Impossible de créer la candidature.")
+        screeningId = newScreening.id;
+      }
+
+      // Store the specific screening ID so the Chat knows which thread to load
+      localStorage.setItem('coach_session_id', screeningId)
+
+      // Application success ! Redirect to AI Coach
       navigate({ to: '/candidate/coach' })
 
     } catch (err: any) {
       console.error(err)
       setErrorMsg(err.message || "Une erreur est survenue lors de l'inscription.")
+    } finally {
       setLoading(false)
     }
   }
@@ -84,10 +143,12 @@ function CandidateApplicationForm() {
           <Sparkles className="w-8 h-8" />
         </div>
         <h2 className="text-center text-3xl font-extrabold text-surface-900 tracking-tight">
-          Votre candidature
+          {isLogin ? "Heureux de vous revoir" : "Votre candidature"}
         </h2>
         <p className="mt-3 text-center text-sm text-gray-500 max-w-sm mx-auto">
-          AuraHR analyse votre profil via un court échange avec notre intelligence artificielle.
+          {isLogin
+            ? "Connectez-vous pour finaliser votre candidature et passer votre premier entretien."
+            : "Inscrivez-vous pour créer votre profil candidat permanent sur AuraHR."}
         </p>
       </div>
 
@@ -96,41 +157,44 @@ function CandidateApplicationForm() {
           <div className="absolute inset-0 bg-gradient-to-b from-white/40 to-transparent pointer-events-none" />
 
           <form className="space-y-6 relative z-10" onSubmit={handleApply}>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="firstName" className="block text-sm font-semibold text-gray-700 ml-1 mb-2">
-                  Prénom
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                    <User className="h-5 w-5 text-gray-400" />
+
+            {!isLogin && (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="firstName" className="block text-sm font-semibold text-gray-700 ml-1 mb-2">
+                    Prénom
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                      <User className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <input
+                      id="firstName"
+                      type="text"
+                      required={!isLogin}
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      className="block w-full pl-10 pr-3 py-3 bg-white/60 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-shadow"
+                      placeholder="Jean"
+                    />
                   </div>
+                </div>
+                <div>
+                  <label htmlFor="lastName" className="block text-sm font-semibold text-gray-700 ml-1 mb-2">
+                    Nom
+                  </label>
                   <input
-                    id="firstName"
+                    id="lastName"
                     type="text"
-                    required
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-3 bg-white/60 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-shadow"
-                    placeholder="Jean"
+                    required={!isLogin}
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="block w-full px-4 py-3 bg-white/60 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-shadow"
+                    placeholder="Dupont"
                   />
                 </div>
               </div>
-              <div>
-                <label htmlFor="lastName" className="block text-sm font-semibold text-gray-700 ml-1 mb-2">
-                  Nom
-                </label>
-                <input
-                  id="lastName"
-                  type="text"
-                  required
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  className="block w-full px-4 py-3 bg-white/60 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-shadow"
-                  placeholder="Dupont"
-                />
-              </div>
-            </div>
+            )}
 
             <div>
               <label htmlFor="email" className="block text-sm font-semibold text-gray-700 ml-1 mb-2">
@@ -150,9 +214,31 @@ function CandidateApplicationForm() {
                   placeholder="jean.dupont@email.com"
                 />
               </div>
-              <p className="mt-2 text-xs text-gray-500">
-                Un lien magique vous sera envoyé pour suivre votre candidature.
-              </p>
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-semibold text-gray-700 ml-1 mb-2">
+                Mot de passe
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="block w-full pl-10 pr-3 py-3 bg-white/60 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-shadow"
+                  placeholder="••••••••"
+                />
+              </div>
+              {!isLogin && (
+                <p className="mt-2 text-xs text-gray-500 font-medium">
+                  Le mot de passe vous permettra de suivre cette et vos futures candidatures.
+                </p>
+              )}
             </div>
 
             {errorMsg && (
@@ -164,21 +250,35 @@ function CandidateApplicationForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg text-sm font-semibold text-white bg-surface-900 hover:bg-surface-800 hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden"
+              className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg text-sm font-semibold text-white bg-surface-900 hover:bg-surface-800 hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden mt-2"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-primary-600 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
               <span className="relative z-10 flex items-center gap-2">
                 {loading ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
-                  <>Démarrer l'entretien IA <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" /></>
+                  <>{isLogin ? "Se connecter" : "Démarrer l'entretien IA"} <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" /></>
                 )}
               </span>
             </button>
+
+            <div className="text-center mt-5">
+              <button
+                type="button"
+                className="text-sm font-medium text-primary-600 hover:text-primary-700"
+                onClick={() => {
+                  setIsLogin(!isLogin)
+                  setErrorMsg('')
+                }}
+              >
+                {isLogin ? "Je n'ai pas encore de compte" : "J'ai déjà un compte candidat"}
+              </button>
+            </div>
+
           </form>
         </div>
         <p className="text-center text-xs text-gray-400 mt-8 font-medium">
-          Aucune préparation nécessaire. Soyez vous-même.
+          {isLogin ? "Vos données sont sécurisées." : "Aucune préparation nécessaire. Soyez vous-même."}
         </p>
       </div>
     </div>

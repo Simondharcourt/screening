@@ -1,15 +1,17 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import { chatApi } from '../../api/chat'
 import type { ChatMessage, ExtractedProfile } from '../../api/chat'
+import { supabase } from '../../lib/supabase'
 
 export const Route = createFileRoute('/candidate/coach')({
     component: CandidateCoach,
 })
 
 function CandidateCoach() {
-    // Use a simple session ID for this demo. In prod, use the user ID.
-    const [sessionId] = useState(() => localStorage.getItem('coach_session_id') || `sess_${Date.now()}`)
+    const navigate = useNavigate()
+    const [sessionId, setSessionId] = useState<string | null>(null)
+    const [isCheckingAuth, setIsCheckingAuth] = useState(true)
 
     const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: 'Bonjour ! Je suis votre Coach Carrière. Parlez-moi un peu de ce que vous recherchez comme emploi !' }])
     const [input, setInput] = useState('')
@@ -19,17 +21,32 @@ function CandidateCoach() {
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
-        localStorage.setItem('coach_session_id', sessionId)
-        // Load history on mount
-        chatApi.getHistory(sessionId).then(res => {
-            if (res.messages && res.messages.length > 0) {
-                setMessages(res.messages)
+        const verifySession = async () => {
+            const { data: { session } } = await supabase.auth.getSession()
+            const storedSessionId = localStorage.getItem('coach_session_id')
+
+            if (!session || !storedSessionId) {
+                // If not authenticated, or missing the active application context, return to jobs
+                navigate({ to: '/jobs' })
+                return
             }
-            if (res.profile) {
-                setProfile(res.profile)
-            }
-        }).catch(console.error)
-    }, [sessionId])
+
+            setSessionId(storedSessionId)
+            setIsCheckingAuth(false)
+
+            // Load history
+            chatApi.getHistory(storedSessionId).then(res => {
+                if (res.messages && res.messages.length > 0) {
+                    setMessages(res.messages)
+                }
+                if (res.profile) {
+                    setProfile(res.profile)
+                }
+            }).catch(console.error)
+        }
+
+        verifySession()
+    }, [navigate])
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -37,7 +54,7 @@ function CandidateCoach() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!input.trim() || isTyping) return
+        if (!input.trim() || isTyping || !sessionId) return
 
         const userMessage = input.trim()
         setInput('')
@@ -71,6 +88,14 @@ function CandidateCoach() {
         } finally {
             setIsTyping(false)
         }
+    }
+
+    if (isCheckingAuth) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-surface-50">
+                <div className="w-8 h-8 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin"></div>
+            </div>
+        )
     }
 
     return (
