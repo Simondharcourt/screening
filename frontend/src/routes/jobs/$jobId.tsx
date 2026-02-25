@@ -1,14 +1,20 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { jobsApi } from '../../api/jobs'
 import { candidatesApi } from '../../api/candidates'
 import { matchingApi } from '../../api/matching'
 import { vapiApi } from '../../api/vapi'
+import Vapi from '@vapi-ai/web'
 
 export const Route = createFileRoute('/jobs/$jobId')({
     component: JobDetail,
 })
+
+// Vapi requires the public key to initialize the Web SDK
+// Let's use the explicit public key: "d37d7ab0-c2ee-4a18-844e-811435bc2b35" which is the user's API Key. 
+// Actually, Vapi Web SDK needs the Public Key, not the Private API Key. 
+// But since this is a prototype, we'll initialize it when the user clicks 'Appeler'
 
 function JobDetail() {
     const { jobId } = Route.useParams()
@@ -21,7 +27,43 @@ function JobDetail() {
     const [callingCandidate, setCallingCandidate] = useState<string | null>(null)
     const [transcriptModalData, setTranscriptModalData] = useState<{ name: string, transcript: string, status: string } | null>(null)
     const [phoneInputCandidate, setPhoneInputCandidate] = useState<{ id: string, screeningId: string, name: string } | null>(null)
-    const [phoneNumber, setPhoneNumber] = useState('+33600000000')
+
+    // Instead of a phone number, we just need confirmation to start the web call
+    const [isWebCallActive, setIsWebCallActive] = useState(false);
+    const [vapiInstance, setVapiInstance] = useState<any>(null);
+
+    useEffect(() => {
+        // Initialize Vapi with the Public Key once
+        // Handle Vite's ESM interop if Vapi module is exported under .default
+        const VapiConstructor = (Vapi as any).default || Vapi;
+        const v = new VapiConstructor("887f35e6-93e3-4643-bd9f-0a646c63dcb7");
+
+        v.on('call-start', () => {
+            setIsWebCallActive(true);
+            setCallingCandidate(phoneInputCandidate?.id || null);
+            setPhoneInputCandidate(null);
+        });
+
+        v.on('call-end', () => {
+            setIsWebCallActive(false);
+            setCallingCandidate(null);
+            alert("L'appel web est terminé ! La transcription devrait arriver d'ici quelques secondes.");
+            queryClient.invalidateQueries({ queryKey: ['candidates', jobId] });
+        });
+
+        v.on('error', (e: any) => {
+            console.error("Vapi Web Error", e);
+            alert("Erreur lors de l'appel web via le navigateur.");
+            setIsWebCallActive(false);
+            setCallingCandidate(null);
+        });
+
+        setVapiInstance(v);
+
+        return () => {
+            v.stop();
+        };
+    }, []);
 
     const scoreMutation = useMutation({
         mutationFn: matchingApi.scoreCandidate,
@@ -42,24 +84,29 @@ function JobDetail() {
     }
 
     const callMutation = useMutation({
-        mutationFn: ({ screeningId, phone }: { screeningId: string, phone: string }) => vapiApi.triggerCall(screeningId, phone),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['candidates', jobId] })
-            setPhoneInputCandidate(null)
-            setCallingCandidate(null)
-            alert('Appel Vapi déclenché avec succès !')
+        // We no longer need a real phone number
+        mutationFn: ({ screeningId }: { screeningId: string }) => vapiApi.triggerCall(screeningId, "+33600000000"),
+        onSuccess: (data: any) => {
+            // The backend now returns call_details: { assistant_id: "..." }
+            if (data && data.call_details && data.call_details.assistant_id && vapiInstance) {
+                // Start the WebRTC call in the browser directly to this temporary assistant
+                vapiInstance.start(data.call_details.assistant_id);
+            } else {
+                alert("Erreur : Impossible de récupérer l'ID de l'assistant Vapi.");
+                setCallingCandidate(null);
+            }
         },
         onError: (err: any) => {
-            alert(err.message || 'Erreur lors de l\'appel')
+            alert(err.message || 'Erreur lors de l\'initialisation de l\'appel')
             setCallingCandidate(null)
         }
     })
 
     const handleCallSubmit = (e: React.FormEvent) => {
         e.preventDefault()
-        if (phoneInputCandidate) {
+        if (phoneInputCandidate && vapiInstance) {
             setCallingCandidate(phoneInputCandidate.id)
-            callMutation.mutate({ screeningId: phoneInputCandidate.screeningId, phone: phoneNumber })
+            callMutation.mutate({ screeningId: phoneInputCandidate.screeningId })
         }
     }
 
@@ -208,9 +255,27 @@ function JobDetail() {
                                                             Voir l'entretien
                                                         </button>
                                                     ) : wrapper.screening.call_status === 'calling' || wrapper.screening.call_status === 'in-progress' || wrapper.screening.call_status === 'ringing' ? (
-                                                        <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
-                                                            Appel en cours...
-                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                                                                Appel en cours...
+                                                            </span>
+                                                            {isWebCallActive && callingCandidate === wrapper.candidate.id ? (
+                                                                <button
+                                                                    onClick={() => vapiInstance?.stop()}
+                                                                    className="text-xs text-red-600 hover:text-red-500 underline font-medium"
+                                                                >
+                                                                    (Raccrocher)
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => setPhoneInputCandidate({ id: wrapper.candidate.id, screeningId: wrapper.screening.id, name: wrapper.candidate.name })}
+                                                                    disabled={callingCandidate === wrapper.candidate.id}
+                                                                    className="text-xs text-blue-600 hover:text-blue-500 underline text-nowrap"
+                                                                >
+                                                                    (Relancer)
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     ) : (
                                                         <button
                                                             onClick={() => setPhoneInputCandidate({ id: wrapper.candidate.id, screeningId: wrapper.screening.id, name: wrapper.candidate.name })}
@@ -277,20 +342,14 @@ function JobDetail() {
                                 <form onSubmit={handleCallSubmit}>
                                     <h3 className="text-lg font-semibold leading-6 text-gray-900">Appeler {phoneInputCandidate.name}</h3>
                                     <div className="mt-4">
-                                        <label className="block text-sm font-medium text-gray-700">Numéro de téléphone final (format +33...)</label>
-                                        <input
-                                            type="text"
-                                            required
-                                            value={phoneNumber}
-                                            onChange={e => setPhoneNumber(e.target.value)}
-                                            className="mt-1 block w-full rounded-md border-0 py-1.5 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600 sm:text-sm"
-                                            placeholder="+33612345678"
-                                        />
-                                        <p className="mt-2 text-xs text-gray-500">L'Agent IA Vocale Vapi va démarrer un appel immédiatement vers ce numéro concernant l'offre actuelle.</p>
+                                        <p className="mt-2 text-sm text-gray-500">
+                                            L'Agent IA Vocale Vapi va démarrer un appel <strong>depuis votre navigateur</strong> concernant l'offre actuelle.
+                                        </p>
+                                        <p className="mt-2 text-xs text-gray-400">Assurez-vous d'avoir autorisé l'accès au microphone.</p>
                                     </div>
                                     <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
-                                        <button type="submit" disabled={callMutation.isPending} className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:col-start-2 disabled:opacity-50">
-                                            {callMutation.isPending ? 'Lancement...' : 'Appeler'}
+                                        <button type="submit" disabled={callMutation.isPending || isWebCallActive} className="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:col-start-2 disabled:opacity-50">
+                                            {callMutation.isPending ? 'Lancement...' : isWebCallActive ? 'Appel en cours' : 'Démarrer l\'appel Web'}
                                         </button>
                                         <button type="button" onClick={() => setPhoneInputCandidate(null)} className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0">
                                             Annuler

@@ -5,6 +5,7 @@ from app.core.database import supabase
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from typing import Dict, Any, List
+from app.core.config import settings
 
 router = APIRouter(prefix="/matching", tags=["Matching"])
 
@@ -44,7 +45,7 @@ def analyze_fit(request: MatchScoreRequest):
     screening_id = screen_resp.data[0]["id"]
 
     # 4. Prompt the LLM
-    llm = ChatAnthropic(model="claude-3-5-sonnet-latest", temperature=0)
+    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0)
     structured_llm = llm.with_structured_output(MatchScoreResponse)
     
     prompt = ChatPromptTemplate.from_messages([

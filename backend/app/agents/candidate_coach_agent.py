@@ -5,6 +5,7 @@ from pydantic import BaseModel as LangchainBaseModel, Field
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+from app.core.config import settings
 
 # --- 1. Define State & Schemas ---
 
@@ -24,7 +25,7 @@ class CoachAgentState(TypedDict):
 def extraction_node(state: CoachAgentState) -> Dict[str, Any]:
     """Reads the conversation history so far and attempts to update the extracted profile."""
     # We only need to run this if there are messages. We use a separate LLM call to parse.
-    llm = ChatAnthropic(model="claude-3-5-sonnet-latest", temperature=0)
+    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0)
     structured_llm = llm.with_structured_output(ExtractedProfile)
     
     prompt = ChatPromptTemplate.from_messages([
@@ -49,7 +50,7 @@ def extraction_node(state: CoachAgentState) -> Dict[str, Any]:
 
 def chat_node(state: CoachAgentState) -> Dict[str, Any]:
     """Generates the next response to the user based on missing profile data."""
-    llm = ChatAnthropic(model="claude-3-5-sonnet-latest", temperature=0.7)
+    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0.7)
     
     # We serialize the extracted profile to let the LLM know what it still needs to ask
     current_profile = state.get("extracted_profile", ExtractedProfile())

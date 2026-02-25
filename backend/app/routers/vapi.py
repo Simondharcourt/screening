@@ -30,9 +30,6 @@ async def trigger_screening_call(screening_id: str, request: CallTriggerRequest)
     if not candidate or not job:
         raise HTTPException(status_code=400, detail="Incomplete screening, missing candidate or job relation")
 
-    # Update database status immediately
-    supabase.table("screenings").update({"call_status": "calling"}).eq("id", screening_id).execute()
-
     try:
         call_response = await VapiService.trigger_call(
             phone_number=request.phone_number,
@@ -40,10 +37,14 @@ async def trigger_screening_call(screening_id: str, request: CallTriggerRequest)
             candidate_context=candidate,
             screening_id=screening_id
         )
+        
+        # Update database status immediately only AFTER Vapi successfully returns
+        supabase.table("screenings").update({"call_status": "calling"}).eq("id", screening_id).execute()
+        
         return {"status": "success", "call_details": call_response}
     except Exception as e:
         logger.error(f"Error triggering call: {e}")
-        # Revert status
+        # Revert status explicitly if needed, but since we didn't update it yet we just throw
         supabase.table("screenings").update({"call_status": "failed"}).eq("id", screening_id).execute()
         raise HTTPException(status_code=500, detail=str(e))
 

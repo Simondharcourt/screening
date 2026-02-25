@@ -1,5 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+import os
+
+# Explicitly load .env into os.environ so all external libraries (Anthropic, OpenAI) find their keys
+load_dotenv()
 
 app = FastAPI(
     title="HR AI Screening Platform API",

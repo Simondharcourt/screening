@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     VAPI_API_KEY: str = ""
     VAPI_PHONE_NUMBER_ID: str = ""
     WEBHOOK_URL: str = ""
+    
+    # LLM Settings
+    LLM_MODEL: str = "claude-sonnet-4-6"
 
     model_config = SettingsConfigDict(
         env_file=".env",

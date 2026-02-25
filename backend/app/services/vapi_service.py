@@ -57,45 +57,36 @@ class VapiService:
         # We assume the user has a VAPI_PHONE_NUMBER_ID in settings if doing real PSTN calls,
         # otherwise for Web testing this might differ. We will use a typical PSTN payload.
         
+        # payload for creating a temporary Web Assistant
         payload = {
             "name": f"Screening - {candidate_name}",
-            "assistant": {
-                "name": "Recruiter Voice AI",
-                "model": {
-                    "provider": "anthropic",
-                    "model": "claude-3-5-sonnet-latest",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": system_prompt
-                        }
-                    ]
-                },
-                "voice": {
-                    "provider": "11labs", # Can change to playht/openai
-                    "voiceId": "eleven_multilingual_v2", # Sample
-                },
-                "firstMessage": f"Bonjour {candidate_name}, je suis l'assistant recrutement pour le poste de {job_title}. Est-ce que vous m'entendez bien et avez-vous 5 minutes pour échanger ?",
-                "serverUrl": getattr(settings, "WEBHOOK_URL", "") # To receive webhook updates
+            "model": {
+                "provider": "anthropic",
+                "model": settings.LLM_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    }
+                ]
             },
-            "customer": {
-                "number": phone_number,
-                "name": candidate_name
+            "voice": {
+                "provider": "openai",
+                "voiceId": "alloy",
             },
-            # Metadata we can read back in the webhook to identify which screening this was
+            "firstMessage": f"Bonjour {candidate_name}, je suis l'assistant recrutement pour le poste de {job_title}. Est-ce que vous m'entendez bien et avez-vous 5 minutes pour échanger ?",
+            "serverUrl": getattr(settings, "WEBHOOK_URL", ""),
             "metadata": {
-                "screening_id": screening_id
+                "screening_id": screening_id,
+                "candidate_name": candidate_name
             }
         }
         
-        # If the user put a phone number sid in the env, use it.
-        phone_number_id = getattr(settings, "VAPI_PHONE_NUMBER_ID", None)
-        if phone_number_id:
-             payload["phoneNumberId"] = phone_number_id
-
         async with httpx.AsyncClient() as client:
+            # We create an assistant in Vapi. 
+            # The frontend will then connect to this specific Assistant ID via the Vapi Web SDK.
             response = await client.post(
-                "https://api.vapi.ai/call/phone",
+                "https://api.vapi.ai/assistant",
                 headers=headers,
                 json=payload,
                 timeout=30.0
@@ -103,6 +94,12 @@ class VapiService:
             
             if response.status_code >= 400:
                 logger.error(f"Vapi Error: {response.text}")
-                raise Exception(f"Failed to trigger Vapi call: {response.status_code} - {response.text}")
+                raise Exception(f"Failed to create Vapi Web Assistant: {response.status_code} - {response.text}")
                 
-            return response.json()
+            assistant_data = response.json()
+            
+            return {
+                "call_type": "web",
+                "assistant_id": assistant_data.get("id"),
+                "status": "assistant_created"
+            }
