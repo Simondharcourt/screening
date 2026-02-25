@@ -7,7 +7,7 @@ def get_supabase_client() -> Client:
     If the URL or Key is not configured, it will raise an error during client creation
     or when performing operations.
     """
-    url: str = settings.SUPABASE_URL
+    url: str = settings.SUPABASE_URL.rstrip('/')
     key: str = settings.SUPABASE_SERVICE_ROLE_KEY # Using service role for backend operations
     
     # We allow the app to boot without these during initial setup
