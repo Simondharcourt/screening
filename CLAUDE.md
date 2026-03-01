@@ -21,7 +21,7 @@ Open-source AI-powered HR platform that automates candidate screening through vo
 | Agent Orchestration | LangGraph |
 | Voice Agent | Vapi |
 | LLM | Claude API (Anthropic) — primary for reasoning, evaluation, job generation |
-| Embeddings | OpenAI text-embedding-3-small |
+| Embeddings | HuggingFace (intfloat/multilingual-e5-large) — local, 1024 dims |
 | Vector Search | pgvector (Supabase) |
 | External Jobs | France Travail API |
 | Observability | LangSmith |
@@ -66,8 +66,8 @@ hr-ai-platform/
 
 ```
 users (id, role: recruiter|candidate, email, created_at)
-job_postings (id, recruiter_id, title, description, questions, source, external_id, external_url, embedding vector(1536), created_at, status)
-candidates (id, user_id, profile_text, cv_url, embedding vector(1536), created_at)
+job_postings (id, recruiter_id, title, description, questions, source, external_id, external_url, embedding vector(1024), created_at, status)
+candidates (id, user_id, profile_text, cv_url, embedding vector(1024), created_at)
 screenings (id, job_posting_id, candidate_id, status, compatibility_score, performance_score, created_at)
 interviews (id, candidate_id, job_id, vapi_call_id, transcript, duration_seconds, status, started_at, ended_at)
 evaluations (id, interview_id, scores: dict, overall_score, summary, strengths, weaknesses, recommendation, created_at)
@@ -75,7 +75,7 @@ evaluations (id, interview_id, scores: dict, overall_score, summary, strengths, 
 
 Key notes:
 - `job_postings.source`: `internal | france_travail | ...` — external jobs only used for recommendations, never trigger Vapi calls
-- `embedding vector(1536)` on both `job_postings` and `candidates` for RAG/matching
+- `embedding vector(1024)` on both `job_postings` and `candidates` for RAG/matching
 - Audios are NOT stored after transcription (GDPR)
 
 ---
@@ -154,7 +154,7 @@ GET    /evaluations/{candidate_id} # Get evaluation results
 ```env
 # LLM
 ANTHROPIC_API_KEY=...
-OPENAI_API_KEY=...          # For embeddings (text-embedding-3-small)
+# No OpenAI API key needed anymore for embeddings (using local HF model)
 
 # Vapi
 VAPI_API_KEY=...
@@ -193,6 +193,11 @@ FRONTEND_URL=http://localhost:3000
 - **Score detail always displayed** — never show a single score without breakdown to keep humans in the loop
 - Commit with conventional commits: `feat:`, `fix:`, `test:`, `docs:`
 - Ruff for linting, pytest for tests, type hints throughout Python codebase
+
+### Embeddings
+- Using `intfloat/multilingual-e5-large` (HuggingFace, local, 1024 dims) — no OpenAI key needed
+- Model is **lazy-loaded** in `embedding_service.py` to avoid SIGSEGV when Celery forks workers
+- **TODO (Dockerfile):** Pre-bake the model (~560 MB) into the Docker image so Railway doesn't re-download it on every deploy. Pattern: run `HuggingFaceEmbeddings(model_name=...)` during `docker build` so the HF cache is included in the image layer. Redis and the worker should share the same image or a common base.
 
 ---
 

@@ -4,6 +4,7 @@ from app.schemas.jobs import JobPostingCreate, JobPostingResponse, JobPostingUpd
 from app.schemas.ai import JobGenerateRequest, JobGenerateResponse
 from app.services.job_service import JobService
 from app.agents.job_description_agent import job_description_agent
+from app.worker.tasks import fetch_wttj_jobs, fetch_francetravail_jobs
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -48,3 +49,21 @@ async def update_job(job_id: str, job: JobPostingUpdate):
     if not result:
         raise HTTPException(status_code=400, detail="Could not update job")
     return result
+
+@router.post("/scrape/{source}")
+async def trigger_scrape(source: str):
+    """
+    Manually trigger a scraping task. 
+    Source can be 'wttj' or 'francetravail'.
+    """
+    if source == "wttj":
+        # Using .delay() puts the task on the Celery queue. 
+        # For synchronous testing, we could just call the function directly, but let's queue it.
+        task = fetch_wttj_jobs.delay()
+        return {"message": "WTTJ scraping task queued", "task_id": task.id}
+    elif source == "francetravail":
+        task = fetch_francetravail_jobs.delay()
+        return {"message": "France Travail scraping task queued", "task_id": task.id}
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown source: {source}")
+

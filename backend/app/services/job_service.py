@@ -1,7 +1,7 @@
 from app.core.database import supabase
 from app.schemas.jobs import JobPostingCreate, JobPostingUpdate
 from app.services.embedding_service import EmbeddingService
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 
 class JobService:
@@ -48,3 +48,32 @@ class JobService:
             
         response = supabase.table("job_postings").update(data).eq("id", job_id).execute()
         return response.data[0] if response.data else None
+
+    @staticmethod
+    def upsert_scraped_job(job_data: JobPostingCreate, source: str, external_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Upserts a job posting from an external source (e.g. wttj, francetravail).
+        Uses the unique constraint on (source, external_id) to update existing jobs or insert new ones.
+        """
+        data = job_data.model_dump()
+        data["source"] = source
+        data["external_id"] = external_id
+        data["status"] = "active"
+
+        existing_resp = supabase.table("job_postings").select("*").eq("source", source).eq("external_id", external_id).execute()
+
+        if existing_resp.data:
+            existing = existing_resp.data[0]
+            if existing.get("title") != data["title"] or existing.get("description") != data["description"]:
+                text_to_embed = f"{data['title']} {data.get('description', '')} {' '.join(data.get('questions', []))}"
+                data['embedding'] = EmbeddingService.generate(text_to_embed)
+            else:
+                data['embedding'] = existing.get('embedding')
+            response = supabase.table("job_postings").update(data).eq("id", existing["id"]).execute()
+        else:
+            text_to_embed = f"{data['title']} {data.get('description', '')} {' '.join(data.get('questions', []))}"
+            data['embedding'] = EmbeddingService.generate(text_to_embed)
+            response = supabase.table("job_postings").insert(data).execute()
+
+        return response.data[0] if response.data else None
+

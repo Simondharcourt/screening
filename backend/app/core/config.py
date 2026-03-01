@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # LLM Settings
     LLM_MODEL: str = "claude-sonnet-4-6"
 
+    # Scraping & Worker
+    REDIS_URL: str = "redis://localhost:6379/0"
+    SCRAPINGBEE_API_KEY: str = ""
+    FRANCETRAVAIL_CLIENT_ID: str = ""
+    FRANCETRAVAIL_CLIENT_SECRET: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

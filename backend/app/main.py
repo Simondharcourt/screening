@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
-# Explicitly load .env into os.environ so all external libraries (Anthropic, OpenAI) find their keys
+# Explicitly load .env into os.environ so all external libraries find their keys
 load_dotenv()
 
 app = FastAPI(
