@@ -31,5 +31,9 @@ celery_app.conf.update(
             "task": "app.worker.tasks.fetch_francetravail_jobs",
             "schedule": timedelta(hours=6),
         },
+        "cleanup-stale-jobs-daily": {
+            "task": "app.worker.tasks.cleanup_stale_jobs",
+            "schedule": timedelta(days=1),
+        },
     }
 )

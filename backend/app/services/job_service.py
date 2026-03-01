@@ -2,6 +2,7 @@ from app.core.database import supabase
 from app.schemas.jobs import JobPostingCreate, JobPostingUpdate
 from app.services.embedding_service import EmbeddingService
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
 import uuid
 
 class JobService:
@@ -50,15 +51,24 @@ class JobService:
         return response.data[0] if response.data else None
 
     @staticmethod
-    def upsert_scraped_job(job_data: JobPostingCreate, source: str, external_id: str) -> Optional[Dict[str, Any]]:
+    def upsert_scraped_job(
+        job_data: JobPostingCreate,
+        source: str,
+        external_id: str,
+        expires_at: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
-        Upserts a job posting from an external source (e.g. wttj, francetravail).
-        Uses the unique constraint on (source, external_id) to update existing jobs or insert new ones.
+        Upserts a job posting from an external source.
+        - last_seen_at is always refreshed to now()
+        - expires_at is set when the source provides freshness metadata (e.g. FT dateActualisation)
         """
         data = job_data.model_dump()
         data["source"] = source
         data["external_id"] = external_id
         data["status"] = "active"
+        data["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+        if expires_at:
+            data["expires_at"] = expires_at
 
         existing_resp = supabase.table("job_postings").select("*").eq("source", source).eq("external_id", external_id).execute()
 
@@ -76,4 +86,42 @@ class JobService:
             response = supabase.table("job_postings").insert(data).execute()
 
         return response.data[0] if response.data else None
+
+    @staticmethod
+    def close_stale_jobs(source: str, stale_after_days: int = 7) -> int:
+        """
+        Mark as 'closed' all active jobs from a source not seen in the last stale_after_days days,
+        or whose expires_at is in the past.
+        Returns the number of jobs closed.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        stale_threshold = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        from datetime import timedelta
+        stale_threshold = (datetime.now(timezone.utc) - timedelta(days=stale_after_days)).isoformat()
+
+        # Close jobs not seen since stale_threshold
+        resp1 = (
+            supabase.table("job_postings")
+            .update({"status": "closed"})
+            .eq("source", source)
+            .eq("status", "active")
+            .lt("last_seen_at", stale_threshold)
+            .execute()
+        )
+
+        # Close jobs whose expires_at has passed
+        resp2 = (
+            supabase.table("job_postings")
+            .update({"status": "closed"})
+            .eq("source", source)
+            .eq("status", "active")
+            .lt("expires_at", now)
+            .not_.is_("expires_at", "null")
+            .execute()
+        )
+
+        closed = len(resp1.data or []) + len(resp2.data or [])
+        return closed
 

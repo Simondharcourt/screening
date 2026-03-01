@@ -1,8 +1,10 @@
 import logging
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 from app.core.config import settings
+
+FT_OFFER_VALIDITY_DAYS = 30  # Close FT offers not updated in 30 days
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,15 @@ class FrancetravailScraper:
 
             if response.status_code in (200, 206):
                 jobs = response.json().get("resultats", [])
+                # Attach expires_at from dateActualisation + FT_OFFER_VALIDITY_DAYS
+                for job in jobs:
+                    date_actu = job.get("dateActualisation") or job.get("dateCreation")
+                    if date_actu:
+                        try:
+                            dt = datetime.fromisoformat(date_actu.replace("Z", "+00:00"))
+                            job["expires_at"] = (dt + timedelta(days=FT_OFFER_VALIDITY_DAYS)).isoformat()
+                        except ValueError:
+                            pass
                 logger.info(f"France Travail fetched {len(jobs)} jobs (keywords='{keywords}')")
                 return jobs
             else:
