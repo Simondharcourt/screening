@@ -4,72 +4,109 @@ from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+
 class WTTJScraper:
-    # WTTJ uses Algolia for their search. We can query it directly using their public 
-    # Application ID and Search-Only API Key, effectively bypassing DataDome.
+    # WTTJ uses Algolia for their search — queryable directly with their public keys,
+    # bypassing DataDome. The full job content (profile, missions, salary…) is in the hit.
     ALGOLIA_APP_ID = "CSEKHVMS53"
     ALGOLIA_API_KEY = "4bd8f6215d0cc52b26430765769e65a0"
     ALGOLIA_URL = f"https://{ALGOLIA_APP_ID.lower()}-dsn.algolia.net/1/indexes/*/queries"
-    
+
     @classmethod
-    def fetch_jobs(cls) -> List[Dict[str, Any]]:
-        """Fetch the latest developer jobs from WTTJ's Algolia index"""
-        logger.info(f"Using direct Algolia API to fetch WTTJ jobs")
-        
+    def fetch_jobs(cls, query: str = "developpeur", nb_pages: int = 1) -> List[Dict[str, Any]]:
+        """
+        Fetch jobs from WTTJ via Algolia.
+        - query: search keyword (default: 'developpeur')
+        - nb_pages: number of pages to fetch (50 results/page)
+        """
         headers = {
             "x-algolia-api-key": cls.ALGOLIA_API_KEY,
             "x-algolia-application-id": cls.ALGOLIA_APP_ID,
-            "content-type": "application/x-www-form-urlencoded",
+            "content-type": "application/json",
             "Origin": "https://www.welcometothejungle.com",
-            "Referer": "https://www.welcometothejungle.com/"
         }
-        
-        payload = {
-            "requests": [
-                {
+
+        all_jobs: List[Dict[str, Any]] = []
+
+        for page in range(nb_pages):
+            payload = {
+                "requests": [{
                     "indexName": "wttj_jobs_production_fr",
-                    # Querying for developer roles, top 50 recent hits
-                    "params": "query=developpeur&hitsPerPage=50&page=0"
-                }
-            ]
-        }
-        
-        try:
-            response = httpx.post(cls.ALGOLIA_URL, headers=headers, json=payload, timeout=10.0)
-            
-            if response.status_code == 200:
-                data = response.json()
-                raw_hits = data.get("results", [])[0].get("hits", [])
-                
-                logger.info(f"Successfully fetched {len(raw_hits)} from WTTJ Algolia")
-                
-                # Normalize the Algolia payload into the expected Celery format
-                normalized_jobs = []
-                for j in raw_hits:
-                    # Algolia hit 'objectID' maps to WTTJ's internal ID
+                    "params": f"query={query}&hitsPerPage=50&page={page}",
+                }]
+            }
+            try:
+                response = httpx.post(cls.ALGOLIA_URL, headers=headers, json=payload, timeout=10.0)
+                if response.status_code != 200:
+                    logger.error(f"Algolia page {page} returned {response.status_code}: {response.text}")
+                    break
+
+                hits = response.json().get("results", [])[0].get("hits", [])
+                if not hits:
+                    break
+
+                logger.info(f"WTTJ Algolia page {page}: {len(hits)} hits")
+
+                for j in hits:
                     ext_id = j.get("objectID")
                     if not ext_id:
                         continue
-                        
-                    title = j.get("name", "Poste inconnu")
-                    company_name = j.get("organization", {}).get("name", "Inconnue")
+
+                    org = j.get("organization", {})
+                    org_slug = org.get("slug", "")
                     slug = j.get("slug", "")
-                    org_slug = j.get("organization", {}).get("slug", "")
-                    
-                    # WTTJ links are derived from the slug and org slug
                     link = f"https://www.welcometothejungle.com/fr/companies/{org_slug}/jobs/{slug}"
-                    
-                    normalized_jobs.append({
+
+                    # Build a rich description from all available fields
+                    parts = []
+
+                    summary = j.get("summary", "")
+                    if summary:
+                        parts.append(summary)
+
+                    missions = j.get("key_missions", [])
+                    if missions:
+                        parts.append("## Missions\n" + "\n".join(f"- {m}" for m in missions))
+
+                    profile = j.get("profile", "")
+                    if profile:
+                        parts.append("## Profil recherché\n" + profile)
+
+                    # Metadata block for RAG context
+                    meta = []
+                    contract = j.get("contract_type", "")
+                    if contract:
+                        meta.append(f"Contrat: {contract}")
+                    remote = j.get("remote", "")
+                    if remote:
+                        meta.append(f"Télétravail: {remote}")
+                    offices = j.get("offices", [])
+                    if offices:
+                        city = offices[0].get("city", "")
+                        if city:
+                            meta.append(f"Localisation: {city}")
+                    sal_min = j.get("salary_minimum")
+                    sal_max = j.get("salary_maximum")
+                    if sal_min and sal_max:
+                        meta.append(f"Salaire: {int(sal_min)}–{int(sal_max)} €/an")
+                    benefits = j.get("benefits", [])
+                    if benefits:
+                        meta.append(f"Avantages: {', '.join(benefits[:5])}")
+
+                    if meta:
+                        parts.append("## Informations\n" + "\n".join(meta))
+
+                    parts.append(f"Source: {link}")
+
+                    all_jobs.append({
                         "id": ext_id,
-                        "title": title,
-                        "description": f"Entreprise: {company_name} - Voir l'offre détaillée sur: {link}" 
+                        "title": j.get("name", "Poste inconnu"),
+                        "description": "\n\n".join(parts),
                     })
-                    
-                return normalized_jobs
-            else:
-                logger.error(f"Algolia returned status {response.status_code}: {response.text}")
-                return []
-                
-        except Exception as e:
-            logger.error(f"Error fetching WTTJ Algolia jobs: {str(e)}")
-            return []
+
+            except Exception as e:
+                logger.error(f"Error fetching WTTJ Algolia page {page}: {e}")
+                break
+
+        logger.info(f"WTTJ total fetched: {len(all_jobs)} jobs")
+        return all_jobs
