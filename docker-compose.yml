@@ -1,0 +1,27 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file: ./backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - HF_HOME=/app/.cache/huggingface
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command: uv run celery -A app.worker.celery_app worker --beat --loglevel=info
+    env_file: ./backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - HF_HOME=/app/.cache/huggingface
+    depends_on:
+      - redis
+    restart: unless-stopped
