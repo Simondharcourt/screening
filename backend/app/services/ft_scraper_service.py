@@ -7,7 +7,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 class FrancetravailScraper:
-    FRANCETRAVAIL_OAUTH_URL = "https://entreprise.francetravail.fr/connexion/oauth2/access_token"
+    FRANCETRAVAIL_OAUTH_URL = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
     FRANCETRAVAIL_API_URL = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
     
     _access_token = None
@@ -56,41 +56,57 @@ class FrancetravailScraper:
             return None
 
     @classmethod
-    def fetch_jobs(cls) -> List[Dict[str, Any]]:
-        """Fetch the latest tech/developer jobs from France Travail"""
+    def fetch_jobs(
+        cls,
+        keywords: str = "developpeur",
+        location: str = None,
+        contract_type: str = None,
+        nb_results: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch jobs from France Travail API.
+        - keywords: mots-clés de recherche
+        - location: code département (ex: '75') ou commune INSEE
+        - contract_type: CDI, CDD, MIS, SAI, LIB...
+        - nb_results: nombre de résultats (max 150 par appel)
+        """
         token = cls._get_token()
         if not token:
             return []
-            
+
+        nb_results = min(nb_results, 150)
+
         try:
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json"
             }
-            
-            # Code ROME M1805 is often used for IT development, or we can search by keyword
+
             params = {
-                "motsCles": "developpeur développeur software engineer react python",
-                "sort": "1", # Sort by date descending
-                "range": "0-49" # Support up to 150 items per call according to specs (range format 0-149)
+                "motsCles": keywords,
+                "sort": "1",
+                "range": f"0-{nb_results - 1}",
             }
-            
+            if location:
+                params["departement"] = location
+            if contract_type:
+                params["typeContrat"] = contract_type.upper()
+
             response = httpx.get(
                 cls.FRANCETRAVAIL_API_URL,
                 headers=headers,
                 params=params,
                 timeout=10.0
             )
-            
-            if response.status_code == 200 or response.status_code == 206:
-                data = response.json()
-                jobs = data.get("resultats", [])
-                logger.info(f"Successfully fetched {len(jobs)} from France Travail")
+
+            if response.status_code in (200, 206):
+                jobs = response.json().get("resultats", [])
+                logger.info(f"France Travail fetched {len(jobs)} jobs (keywords='{keywords}')")
                 return jobs
             else:
-                logger.error(f"Failed to fetch FT jobs. Status {response.status_code}: {response.text}")
+                logger.error(f"FT API error {response.status_code}: {response.text}")
                 return []
-                
+
         except Exception as e:
-            logger.error(f"Error fetching FT jobs: {str(e)}")
+            logger.error(f"Error fetching FT jobs: {e}")
             return []

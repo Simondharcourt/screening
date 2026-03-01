@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from typing import List
 from app.schemas.jobs import JobPostingCreate, JobPostingResponse, JobPostingUpdate
 from app.schemas.ai import JobGenerateRequest, JobGenerateResponse
@@ -50,20 +51,40 @@ async def update_job(job_id: str, job: JobPostingUpdate):
         raise HTTPException(status_code=400, detail="Could not update job")
     return result
 
-@router.post("/scrape/{source}")
-async def trigger_scrape(source: str):
+class WTTJScrapeRequest(BaseModel):
+    query: str = "developpeur"
+    nb_pages: int = 1
+
+class FranceTravailScrapeRequest(BaseModel):
+    keywords: str = "developpeur"
+    location: str = None       # Code département ex: '75', '69', '13'
+    contract_type: str = None  # CDI, CDD, MIS, SAI, LIB...
+    nb_results: int = 50       # Max 150
+
+@router.post("/scrape/wttj", tags=["Scraping"])
+async def scrape_wttj(params: WTTJScrapeRequest = WTTJScrapeRequest()):
     """
-    Manually trigger a scraping task. 
-    Source can be 'wttj' or 'francetravail'.
+    Scrape Welcome to the Jungle via Algolia (full job content, no ScrapingBee needed).
+    - query: mot-clé (ex: 'react', 'data engineer', 'product manager')
+    - nb_pages: pages à fetcher (50 offres/page)
     """
-    if source == "wttj":
-        # Using .delay() puts the task on the Celery queue. 
-        # For synchronous testing, we could just call the function directly, but let's queue it.
-        task = fetch_wttj_jobs.delay()
-        return {"message": "WTTJ scraping task queued", "task_id": task.id}
-    elif source == "francetravail":
-        task = fetch_francetravail_jobs.delay()
-        return {"message": "France Travail scraping task queued", "task_id": task.id}
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown source: {source}")
+    task = fetch_wttj_jobs.delay(query=params.query, nb_pages=params.nb_pages)
+    return {"message": "WTTJ scraping task queued", "task_id": task.id, "query": params.query, "nb_pages": params.nb_pages}
+
+@router.post("/scrape/francetravail", tags=["Scraping"])
+async def scrape_francetravail(params: FranceTravailScrapeRequest = FranceTravailScrapeRequest()):
+    """
+    Scrape France Travail via leur API officielle (OAuth2).
+    - keywords: mots-clés (ex: 'python django', 'data scientist')
+    - location: code département (ex: '75' pour Paris, '69' pour Lyon)
+    - contract_type: CDI, CDD, MIS, SAI, LIB
+    - nb_results: nombre d'offres (max 150)
+    """
+    task = fetch_francetravail_jobs.delay(
+        keywords=params.keywords,
+        location=params.location,
+        contract_type=params.contract_type,
+        nb_results=params.nb_results,
+    )
+    return {"message": "France Travail scraping task queued", "task_id": task.id, "keywords": params.keywords}
 

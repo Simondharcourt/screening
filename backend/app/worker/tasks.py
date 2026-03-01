@@ -8,12 +8,10 @@ from app.schemas.jobs import JobPostingCreate
 logger = logging.getLogger(__name__)
 
 @celery_app.task(name="app.worker.tasks.fetch_wttj_jobs")
-def fetch_wttj_jobs():
-    """
-    Task to fetch jobs from Welcome to the Jungle using ScrapingBee
-    """
-    logger.info("Starting WTTJ job fetch...")
-    raw_jobs = WTTJScraper.fetch_jobs()
+def fetch_wttj_jobs(query: str = "developpeur", nb_pages: int = 1):
+    """Fetch jobs from Welcome to the Jungle via Algolia."""
+    logger.info(f"Starting WTTJ job fetch: query='{query}', nb_pages={nb_pages}")
+    raw_jobs = WTTJScraper.fetch_jobs(query=query, nb_pages=nb_pages)
     
     upserted_count = 0
     for tj in raw_jobs:
@@ -40,12 +38,10 @@ def fetch_wttj_jobs():
     return {"status": "success", "source": "wttj", "upserted": upserted_count}
 
 @celery_app.task(name="app.worker.tasks.fetch_francetravail_jobs")
-def fetch_francetravail_jobs():
-    """
-    Task to fetch jobs from France Travail
-    """
-    logger.info("Starting France Travail job fetch...")
-    raw_jobs = FrancetravailScraper.fetch_jobs()
+def fetch_francetravail_jobs(keywords: str = "developpeur", location: str = None, contract_type: str = None, nb_results: int = 50):
+    """Fetch jobs from France Travail API."""
+    logger.info(f"Starting France Travail job fetch: keywords='{keywords}'")
+    raw_jobs = FrancetravailScraper.fetch_jobs(keywords=keywords, location=location, contract_type=contract_type, nb_results=nb_results)
     
     upserted_count = 0
     for fj in raw_jobs:
