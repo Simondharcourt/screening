@@ -97,3 +97,9 @@ Supabase Auth (magic link + OAuth) et Supabase Storage pour les CVs et transcrip
 | Déploiement back | Railway (EU) |
 | Déploiement front | Vercel |
 
+
+Côté business:
+
+Pour le côté business, je pense ici à d'abord attirer des candidats avec la promesse de leur proposer l'offres en ligne (récupérées/scappées) la plus adaptée à leur parcours et leur projet pro.
+Puis utiliser les informations recueillies pour les entreprises clientes à trouver le candidat le plus en phase avec ce qu'elles recherchent. 
+Un entretien de préqualification type est ensuite adressée au candidat pour mettre à disposition de l'entreprise deux scores : compatibilité et performance.
