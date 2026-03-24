@@ -48,17 +48,21 @@ def search_algolia_node(state: JobDiscoveryState) -> dict:
     query = " ".join(search_terms[:5])
 
     raw_jobs = WTTJScraper.fetch_jobs(query, nb_pages=3)
-    db_ids = JobService.upsert_wttj_batch(raw_jobs, [])
+    JobService.upsert_wttj_batch(raw_jobs, [])  # persist to DB (side effect only)
 
-    jobs = []
-    for raw, db_id in zip(raw_jobs, db_ids):
-        jobs.append({
-            "id": db_id,
+    # Use Algolia's external_id as the stable key — avoids zip misalignment
+    # from upsert_wttj_batch skipping jobs with no external_id.
+    jobs = [
+        {
+            "id": str(raw.get("id", "")),
             "title": raw.get("title", ""),
             "description": raw.get("description", ""),
             "external_url": raw.get("external_url"),
             "source": "wttj",
-        })
+        }
+        for raw in raw_jobs
+        if raw.get("id")
+    ]
 
     logger.info(f"[search_algolia] {len(jobs)} jobs fetched")
     return {"algolia_jobs": jobs}
@@ -145,7 +149,11 @@ def enrich_jit_node(state: JobDiscoveryState) -> dict:
             future_to_job = {executor.submit(_scrape_job_description, j["external_url"]): j for j in to_enrich}
             for future in as_completed(future_to_job):
                 job = future_to_job[future]
-                full_desc = future.result()
+                try:
+                    full_desc = future.result()
+                except Exception as e:
+                    logger.warning(f"[enrich_jit] scrape failed for {job.get('external_url')}: {e}")
+                    full_desc = None
                 enriched_job = dict(job)
                 enriched_job["description"] = full_desc if full_desc else job.get("description", "")
                 enriched.append(enriched_job)

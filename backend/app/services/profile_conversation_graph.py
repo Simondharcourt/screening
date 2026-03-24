@@ -5,7 +5,7 @@ from langgraph.types import interrupt
 from langgraph.checkpoint.redis import RedisSaver
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from langfuse import observe
 
 from app.core.config import settings
@@ -137,10 +137,15 @@ def answer_processor_node(state: ProfileConversationState) -> dict:
     })
     result: AnswerProcessorResult = structured_llm.invoke(messages)
 
-    # Apply structured updates
+    # Apply structured updates — only whitelisted INFO_GRID fields (prevents
+    # completion_score/summary injection via LLM-controlled structured_updates).
+    _UPDATABLE_FIELDS = set(INFO_GRID)
     for field, value in result.structured_updates.items():
-        if hasattr(profile, field) and value is not None:
-            setattr(profile, field, value)
+        if field in _UPDATABLE_FIELDS and value is not None:
+            try:
+                setattr(profile, field, value)
+            except (ValidationError, ValueError) as e:
+                logger.warning(f"[answer_processor] skipping invalid value for {field}: {e}")
 
     # Append to narrative summary
     if result.narrative_addition:

@@ -128,6 +128,8 @@ function openSSEStream(
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      // eventName persists across chunks so event: and data: can be in different read() calls
+      let eventName = ''
 
       while (true) {
         const { done, value } = await reader.read()
@@ -137,12 +139,14 @@ function openSSEStream(
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
 
-        let eventName = ''
         for (const line of lines) {
           if (line.startsWith('event: ')) {
             eventName = line.slice(7).trim()
           } else if (line.startsWith('data: ') && eventName) {
             try { onEvent(eventName, JSON.parse(line.slice(6))) } catch { /* ignore malformed JSON */ }
+            eventName = ''
+          } else if (line === '') {
+            // Blank line = end of SSE frame; reset in case data: never arrived
             eventName = ''
           }
         }

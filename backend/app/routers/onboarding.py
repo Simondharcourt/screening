@@ -52,7 +52,10 @@ async def upload_cv(file: UploadFile = File(...)):
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-    file_bytes = await file.read()
+    _MAX_CV_SIZE = 10 * 1024 * 1024  # 10 MB
+    file_bytes = await file.read(_MAX_CV_SIZE + 1)
+    if len(file_bytes) > _MAX_CV_SIZE:
+        raise HTTPException(status_code=413, detail="CV file exceeds 10 MB limit")
     cv_text = extract_text_from_pdf(file_bytes)
     if not cv_text:
         raise HTTPException(status_code=422, detail="Impossible d'extraire le texte de ce PDF.")
@@ -133,7 +136,7 @@ async def skip_to_results(session_id: str):
 
     # Resume the graph — it will run gap_analyzer (sees is_complete=True) → finalize
     result = await asyncio.to_thread(
-        _profile_graph.invoke, Command(resume=None), config
+        _profile_graph.invoke, Command(resume=""), config
     )
     return {"profile": result["profile"], "is_complete": True}
 
@@ -159,8 +162,9 @@ async def patch_profile(session_id: str, body: ProfilePatch):
         raise HTTPException(status_code=404, detail="Profile not found")
 
     profile = CandidateProfile.model_validate(resp.data["profile"])
+    _READONLY = {"completion_score"}  # computed fields — never set directly
     for field, value in body.updates.items():
-        if hasattr(profile, field):
+        if hasattr(profile, field) and field not in _READONLY:
             setattr(profile, field, value)
 
     profile.completion_score = compute_completion_score(profile)
