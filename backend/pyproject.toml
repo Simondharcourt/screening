@@ -33,5 +33,6 @@ dev = [
     "envguardx>=0.2.0",
     "patchright>=1.58.2",
     "playwright>=1.58.0",
+    "pytest>=9.0.2",
     "scrapling[all]>=0.2.0",
 ]
