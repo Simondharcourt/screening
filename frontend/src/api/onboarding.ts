@@ -21,7 +21,6 @@ export interface UploadResponse {
   session_id: string
   profile: CandidateProfile
   question: string | null
-  completion_score: number
 }
 
 export interface AnswerResponse {
@@ -96,7 +95,10 @@ export async function skipOnboarding(sessionId: string): Promise<{ profile: Cand
   const response = await fetch(`${API_BASE_URL}/onboarding/skip/${sessionId}`, {
     method: 'POST',
   })
-  if (!response.ok) throw new Error('Skip failed')
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'Skip failed')
+  }
   return response.json()
 }
 
@@ -109,7 +111,10 @@ export async function patchProfile(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ updates }),
   })
-  if (!response.ok) throw new Error('Patch failed')
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'Patch failed')
+  }
   return response.json()
 }
 
