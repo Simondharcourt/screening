@@ -46,14 +46,9 @@ export interface RankedJobResult {
 }
 
 export type SSESearchEvent =
-  | { type: 'phase'; id: number; label: string }
+  | { type: 'phase'; id: number; label: string; total?: number }
   | { type: 'jobs_found'; source: string; delta: number; total: number }
   | { type: 'search_done'; total: number }
-  | { type: 'done' }
-  | { type: 'error'; error: string }
-
-export type SSERankEvent =
-  | { type: 'phase'; id: number; label: string; total: number }
   | { type: 'job_ranked'; data: RankedJobResult }
   | { type: 'done'; total: number }
   | { type: 'error'; error: string }
@@ -172,26 +167,9 @@ export function openSearchStream(
       if (eventName === 'phase') onEvent({ type: 'phase', ...d } as SSESearchEvent)
       else if (eventName === 'jobs_found') onEvent({ type: 'jobs_found', ...d } as SSESearchEvent)
       else if (eventName === 'search_done') onEvent({ type: 'search_done', ...d } as SSESearchEvent)
-      else if (eventName === 'done') onEvent({ type: 'done' })
-      else if (eventName === 'error') onEvent({ type: 'error', ...d } as SSESearchEvent)
-    },
-    onError
-  )
-}
-
-export function openRankStream(
-  sessionId: string,
-  onEvent: (event: SSERankEvent) => void,
-  onError?: (err: Error) => void
-): () => void {
-  return openSSEStream(
-    `${API_BASE_URL}/onboarding/rank-stream/${sessionId}`,
-    (eventName, data) => {
-      const d = data as Record<string, unknown>
-      if (eventName === 'phase') onEvent({ type: 'phase', ...d } as SSERankEvent)
       else if (eventName === 'job_ranked') onEvent({ type: 'job_ranked', data: data as RankedJobResult })
-      else if (eventName === 'done') onEvent({ type: 'done', ...d } as SSERankEvent)
-      else if (eventName === 'error') onEvent({ type: 'error', ...d } as SSERankEvent)
+      else if (eventName === 'done') onEvent({ type: 'done', ...d } as SSESearchEvent)
+      else if (eventName === 'error') onEvent({ type: 'error', ...d } as SSESearchEvent)
     },
     onError
   )

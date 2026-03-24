@@ -4,7 +4,6 @@ import {
   submitAnswer as apiSubmitAnswer,
   skipOnboarding as apiSkipOnboarding,
   openSearchStream,
-  openRankStream,
   type CandidateProfile,
   type RankedJobResult,
 } from '../api/onboarding'
@@ -36,7 +35,6 @@ export function useOnboardingStream() {
 
   const sessionIdRef = useRef<string | null>(null)
   const closeSearchRef = useRef<(() => void) | null>(null)
-  const closeRankRef = useRef<(() => void) | null>(null)
 
   const uploadCv = useCallback(async (file: File) => {
     setState(prev => ({ ...prev, phase: 'uploading', error: null }))
@@ -51,7 +49,7 @@ export function useOnboardingStream() {
         completionScore: result.profile.completion_score,
       }))
 
-      // Start search in background immediately (parallel with questions)
+      // Start unified search+rank stream in background (parallel with questions)
       closeSearchRef.current = openSearchStream(
         result.session_id,
         (event) => {
@@ -67,6 +65,17 @@ export function useOnboardingStream() {
               ...prev,
               phase: prev.currentQuestion === null ? 'answering' : prev.phase,
             }))
+          } else if (event.type === 'phase' && event.id === 3) {
+            setState(prev => ({
+              ...prev,
+              phase: prev.phase === 'answering' ? 'ranking' : prev.phase,
+            }))
+          } else if (event.type === 'job_ranked') {
+            setState(prev => ({ ...prev, rankedJobs: [...prev.rankedJobs, event.data] }))
+          } else if (event.type === 'done') {
+            setState(prev => ({ ...prev, phase: 'results' }))
+          } else if (event.type === 'error') {
+            setState(prev => ({ ...prev, error: event.error }))
           }
         }
       )
@@ -106,28 +115,9 @@ export function useOnboardingStream() {
     }
   }, [])
 
-  const startRanking = useCallback(() => {
-    const sessionId = sessionIdRef.current
-    if (!sessionId) return
-    setState(prev => ({ ...prev, phase: 'ranking', rankedJobs: [] }))
-    closeRankRef.current = openRankStream(
-      sessionId,
-      (event) => {
-        if (event.type === 'job_ranked') {
-          setState(prev => ({ ...prev, rankedJobs: [...prev.rankedJobs, event.data] }))
-        } else if (event.type === 'done') {
-          setState(prev => ({ ...prev, phase: 'results' }))
-        } else if (event.type === 'error') {
-          setState(prev => ({ ...prev, error: event.error }))
-        }
-      }
-    )
-  }, [])
-
   const cleanup = useCallback(() => {
     closeSearchRef.current?.()
-    closeRankRef.current?.()
   }, [])
 
-  return { state, uploadCv, submitAnswer, skipOnboarding, startRanking, cleanup }
+  return { state, uploadCv, submitAnswer, skipOnboarding, cleanup }
 }

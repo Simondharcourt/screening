@@ -32,7 +32,7 @@ const PHASE_TITLES: Record<Phase, string> = {
 }
 
 function CandidateOnboarding() {
-  const { state, uploadCv, submitAnswer, skipOnboarding, startRanking, cleanup } = useOnboardingStream()
+  const { state, uploadCv, submitAnswer, skipOnboarding, cleanup } = useOnboardingStream()
   
   useEffect(() => {
     return () => cleanup()
@@ -51,7 +51,6 @@ function CandidateOnboarding() {
 
   const gradient = PHASE_GRADIENTS[state.phase]
   const showCounter = state.jobsTotal > 0
-  const showStartRankingCta = state.phase === 'answering' && state.currentQuestion === null
 
   return (
     <div className={`min-h-[calc(100vh-64px)] w-full bg-gradient-to-br ${gradient} transition-all duration-[1500ms] ease-in-out relative flex flex-col`}>
@@ -113,21 +112,6 @@ function CandidateOnboarding() {
             sources={state.jobSources}
             isSearching={state.phase === 'searching'}
           />
-        )}
-
-        {/* CTA: start ranking */}
-        {showStartRankingCta && (
-          <div className="text-center mt-8 animate-fade-in">
-            <button
-              onClick={startRanking}
-              className="px-10 py-5 bg-white text-orange-600 font-extrabold rounded-2xl text-xl shadow-[0_20px_40px_rgba(0,0,0,0.2)] hover:shadow-[0_25px_50px_rgba(0,0,0,0.3)] hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer flex items-center justify-center gap-3 mx-auto"
-            >
-              Voir mes {state.jobsTotal} offres personnalisées 
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
-            </button>
-          </div>
         )}
 
         {/* Phase 3 — Ranked jobs */}
