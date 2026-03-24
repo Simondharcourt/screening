@@ -23,28 +23,25 @@ from app.services.job_discovery_graph import (
     JobDiscoveryState,
 )
 
-import redis as redis_lib
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
-
-# Redis client (same connection as Celery)
-redis_client = redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
 
 # Graph singleton — built once on module load.
 # checkpointer.setup() is called at app startup (see main.py lifespan).
 _profile_graph, _checkpointer = build_profile_graph(settings.REDIS_URL)
 
-POOL_TTL = 3600  # Job pool expires after 1 hour
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-def _profile_key(session_id: str) -> str:
-    return f"onboarding:profile:{session_id}"
-
-def _save_profile(session_id: str, profile: CandidateProfile):
-    redis_client.setex(_profile_key(session_id), POOL_TTL, profile.model_dump_json())
+# Reranking chain singleton — shared across all SSE connections
+_ranking_llm = ChatAnthropic(
+    model=settings.LLM_MODEL_FAST,
+    temperature=0,
+    max_tokens=512,
+    api_key=settings.ANTHROPIC_API_KEY,
+)
+_ranking_chain = ChatPromptTemplate.from_messages([
+    ("system", "Tu es un expert RH. Évalue la compatibilité entre ce candidat et cette offre. Score de 0 à 100."),
+    ("human", "Profil:\n{profile}\n\nOffre ({title}):\n{description}\n\nÉvalue la compatibilité."),
+]) | _ranking_llm.with_structured_output(RankedJob)
 
 
 # ── Endpoint 1: Upload CV ─────────────────────────────────────────────────────
@@ -72,9 +69,6 @@ async def upload_cv(file: UploadFile = File(...)):
             "onboarding_complete": False,
         }).execute()
     )
-
-    # Save profile to Redis so SSE stream endpoints can access it
-    _save_profile(session_id, profile)
 
     # Initialize LangGraph state and run to first question
     config = {"configurable": {"thread_id": session_id}}
@@ -227,23 +221,13 @@ async def _generate_discovery_stream(session_id: str):
     profile_text = (
         f"Poste visé: {cp.job_title_target}\nExpérience: {cp.experience_years or '?'} ans\n"
         f"Compétences: {', '.join(cp.skills)}\nAspirations: {cp.aspirations or 'non précisé'}\n"
-        f"Valeurs: {', '.join(cp.values) or 'non précisé'}\nRésumé: {cp.summary}"
+        f"Valeurs: {', '.join(cp.values) if cp.values else 'non précisé'}\nRésumé: {cp.summary}"
     )
-    llm = ChatAnthropic(
-        model=settings.LLM_MODEL_FAST,
-        temperature=0,
-        max_tokens=512,
-        api_key=settings.ANTHROPIC_API_KEY,
-    )
-    chain = ChatPromptTemplate.from_messages([
-        ("system", "Tu es un expert RH. Évalue la compatibilité entre ce candidat et cette offre. Score de 0 à 100."),
-        ("human", "Profil:\n{profile}\n\nOffre ({title}):\n{description}\n\nÉvalue la compatibilité."),
-    ]) | llm.with_structured_output(RankedJob)
 
     rank = 0
     for job in state["enriched_jobs"]:
         try:
-            result: RankedJob = await asyncio.to_thread(chain.invoke, {
+            result: RankedJob = await asyncio.to_thread(_ranking_chain.invoke, {
                 "profile": profile_text,
                 "title": job["title"],
                 "description": (job.get("description") or "")[:2000],
