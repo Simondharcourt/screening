@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useOnboardingStream, type Phase } from '../../hooks/useOnboardingStream'
 import { CvUploadZone } from '../../components/onboarding/CvUploadZone'
 import { ProfilePanel } from '../../components/onboarding/ProfilePanel'
@@ -37,6 +37,17 @@ function CandidateOnboarding() {
   useEffect(() => {
     return () => cleanup()
   }, [cleanup])
+
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmitAnswer = async (answer: string) => {
+    setIsSubmitting(true)
+    try {
+      await submitAnswer(answer)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   const gradient = PHASE_GRADIENTS[state.phase]
   const showCounter = state.jobsTotal > 0
@@ -84,11 +95,12 @@ function CandidateOnboarding() {
             <ProfilePanel profile={state.profile} />
             {state.currentQuestion && (
               <QuestionCard
+                key={state.currentQuestion}
                 question={state.currentQuestion}
                 completionScore={state.completionScore}
-                onSubmit={submitAnswer}
+                onSubmit={handleSubmitAnswer}
                 onSkip={skipOnboarding}
-                isLoading={false}
+                isLoading={isSubmitting}
               />
             )}
           </div>

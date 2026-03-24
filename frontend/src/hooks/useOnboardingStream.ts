@@ -97,8 +97,13 @@ export function useOnboardingStream() {
   const skipOnboarding = useCallback(async () => {
     const sessionId = sessionIdRef.current
     if (!sessionId) return
-    await apiSkipOnboarding(sessionId)
-    setState(prev => ({ ...prev, currentQuestion: null, phase: 'answering' }))
+    try {
+      await apiSkipOnboarding(sessionId)
+    } catch (e: unknown) {
+      setState(prev => ({ ...prev, error: e instanceof Error ? e.message : 'Erreur' }))
+    } finally {
+      setState(prev => ({ ...prev, currentQuestion: null, phase: 'answering' }))
+    }
   }, [])
 
   const startRanking = useCallback(() => {
