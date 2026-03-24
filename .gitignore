@@ -3,3 +3,9 @@ frontend/.env
 **/__pycache__
 *.pyc
 CLAUDE.md
+backend/.claude
+backend/node_modules/
+backend/package.json
+backend/package-lock.json
+backend/skills-lock.json
+backend/nb/
