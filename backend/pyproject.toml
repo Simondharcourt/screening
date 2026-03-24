@@ -24,6 +24,7 @@ dependencies = [
     "python-multipart>=0.0.22",
     "pypdf>=6.9.1",
     "langfuse>=4.0.1",
+    "langgraph-checkpoint-redis>=0.4.0",
 ]
 
 [dependency-groups]
