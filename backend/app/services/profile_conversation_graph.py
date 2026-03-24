@@ -217,7 +217,8 @@ def route_after_gap(state: ProfileConversationState) -> str:
 
 def build_profile_graph(redis_url: str):
     """Builds and compiles the ProfileConversationGraph with Redis checkpointer."""
-    checkpointer = RedisSaver.from_conn_string(redis_url)
+    # from_conn_string returns a context manager; enter it to get the actual saver instance
+    checkpointer = RedisSaver.from_conn_string(redis_url).__enter__()
 
     builder = StateGraph(ProfileConversationState)
     builder.add_node("gap_analyzer", gap_analyzer_node)

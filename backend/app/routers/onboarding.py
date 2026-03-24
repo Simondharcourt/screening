@@ -18,6 +18,8 @@ from app.services.scraper_service import WTTJScraper
 from app.services.job_service import JobService
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
+from langgraph.types import Command
+from app.services.profile_conversation_graph import build_profile_graph
 
 import redis as redis_lib
 logger = logging.getLogger(__name__)
@@ -26,6 +28,9 @@ router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 
 # Redis client (same connection as Celery)
 redis_client = redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
+
+# Graph singleton — built once on module load
+_profile_graph = build_profile_graph(settings.REDIS_URL)
 
 POOL_TTL = 3600  # Job pool expires after 1 hour
 
@@ -60,58 +65,120 @@ def _get_pool(session_id: str) -> list[str]:
 
 @router.post("/upload")
 async def upload_cv(file: UploadFile = File(...)):
-    """
-    Receives a PDF CV, extracts text, analyzes profile, stores in Redis.
-    Returns structured profile + clarifying questions + a fresh session_id.
-    """
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
     file_bytes = await file.read()
     cv_text = extract_text_from_pdf(file_bytes)
-
     if not cv_text:
-        raise HTTPException(
-            status_code=422,
-            detail="Impossible d'extraire le texte de ce PDF. Le fichier est peut-être scanné ou protégé."
-        )
+        raise HTTPException(status_code=422, detail="Impossible d'extraire le texte de ce PDF.")
 
     session_id = str(uuid.uuid4())
 
+    # Pre-fill profile from CV (single LLM call, no questions)
     profile = await asyncio.to_thread(analyze_cv, cv_text)
 
-    _save_profile(session_id, profile)
-    logger.info(f"[session={session_id}] Upload complete — {profile.job_title_target}, {len(profile.skills)} skills")
+    # Create candidate row in Supabase
+    supabase.table("candidates").insert({
+        "id": session_id,
+        "profile": profile.model_dump(),
+        "onboarding_complete": False,
+    }).execute()
 
-    return {
+    # Initialize LangGraph state and run to first question
+    config = {"configurable": {"thread_id": session_id}}
+    initial_state = {
         "session_id": session_id,
         "profile": profile.model_dump(),
+        "qa_history": [],
+        "current_question": None,
+        "is_complete": False,
+    }
+    result = await asyncio.to_thread(_profile_graph.invoke, initial_state, config)
+
+    logger.info(f"[upload] session={session_id}, question={result.get('current_question')!r}")
+    return {
+        "session_id": session_id,
+        "profile": result["profile"],
+        "question": result.get("current_question"),
+        "completion_score": result["profile"].get("completion_score", 0.0),
     }
 
 
-# ── Endpoint 2: Answer questions ──────────────────────────────────────────────
+# ── Endpoint 2: Answer question ───────────────────────────────────────────────
 
 class AnswerRequest(BaseModel):
-    answers: dict  # {"remote_pref": "remote", "salary_min": 55000}
+    answer: str
 
 @router.post("/answer/{session_id}")
-async def submit_answers(session_id: str, body: AnswerRequest):
-    """
-    Merges candidate answers into the stored profile.
-    """
-    profile = _load_profile(session_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Session not found or expired")
+async def submit_answer(session_id: str, body: AnswerRequest):
+    config = {"configurable": {"thread_id": session_id}}
+    result = await asyncio.to_thread(
+        _profile_graph.invoke,
+        Command(resume=body.answer),
+        config,
+    )
+    return {
+        "profile": result["profile"],
+        "question": result.get("current_question"),
+        "completion_score": result["profile"].get("completion_score", 0.0),
+        "is_complete": result.get("is_complete", False),
+    }
 
-    for field, value in body.answers.items():
-        if hasattr(profile, field) and value is not None:
+
+# ── Endpoint 3: Skip to results ───────────────────────────────────────────────
+
+@router.post("/skip/{session_id}")
+async def skip_to_results(session_id: str):
+    """Finalize profile immediately, skipping remaining questions."""
+    config = {"configurable": {"thread_id": session_id}}
+    snapshot = _profile_graph.get_state(config)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Update graph state: set is_complete=True so gap_analyzer routes to finalize
+    _profile_graph.update_state(config, {"is_complete": True})
+
+    # Resume the graph — it will run gap_analyzer (sees is_complete=True) → finalize
+    result = await asyncio.to_thread(
+        _profile_graph.invoke, Command(resume=None), config
+    )
+    return {"profile": result["profile"], "is_complete": True}
+
+
+# ── Endpoint 4: Get / Patch profile ──────────────────────────────────────────
+
+@router.get("/profile/{session_id}")
+async def get_profile(session_id: str):
+    resp = supabase.table("candidates").select("profile").eq("id", session_id).single().execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return resp.data["profile"]
+
+
+class ProfilePatch(BaseModel):
+    updates: dict  # {field: value}
+
+@router.patch("/profile/{session_id}")
+async def patch_profile(session_id: str, body: ProfilePatch):
+    """Direct profile update — bypasses graph (used by structured edit form)."""
+    resp = supabase.table("candidates").select("profile").eq("id", session_id).single().execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    profile = CandidateProfile.model_validate(resp.data["profile"])
+    for field, value in body.updates.items():
+        if hasattr(profile, field):
             setattr(profile, field, value)
 
-    _save_profile(session_id, profile)
-    return {"profile_updated": True, "profile": profile.model_dump()}
+    from app.schemas.candidate import compute_completion_score
+    profile.completion_score = compute_completion_score(profile)
+
+    supabase.table("candidates").update({"profile": profile.model_dump()}).eq("id", session_id).execute()
+    return {"profile": profile.model_dump()}
 
 
-# ── Endpoint 3: Search stream (SSE) ──────────────────────────────────────────
+# ── Endpoint 5: Search stream (SSE) ──────────────────────────────────────────
 
 async def _search_algolia_stream(session_id: str, search_terms: list[str]):
     """Async generator: queries Algolia, yields SSE events as jobs are found."""
@@ -206,7 +273,7 @@ async def search_stream(session_id: str):
     )
 
 
-# ── Endpoint 4: Rank stream (SSE) ─────────────────────────────────────────────
+# ── Endpoint 6: Rank stream (SSE) ─────────────────────────────────────────────
 
 class RankedJob(BaseModel):
     score: int = Field(description="Score de compatibilité 0-100")
@@ -287,7 +354,7 @@ async def _generate_rank_stream(session_id: str):
                     "description": (job.get("description") or "")[:2000],
                 }
             )
-            logger.info(f"[rank-stream] ✓ job {rank+1}/{total_jobs} score={result.score}/100")
+            logger.info(f"[rank-stream] job {rank+1}/{total_jobs} score={result.score}/100")
             rank += 1
             payload = {
                 "rank": rank,
