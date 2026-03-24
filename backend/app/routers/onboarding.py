@@ -10,7 +10,8 @@ from typing import Optional
 from app.core.config import settings
 from app.core.database import supabase
 from app.services.cv_parser_service import extract_text_from_pdf
-from app.services.profile_analyzer_service import analyze_cv, CandidateProfile
+from app.services.profile_analyzer_service import analyze_cv
+from app.schemas.candidate import CandidateProfile
 from app.services.skill_extractor import extract_skills_from_profile
 from app.services.embedding_service import EmbeddingService
 from app.services.scraper_service import WTTJScraper
@@ -85,7 +86,6 @@ async def upload_cv(file: UploadFile = File(...)):
     return {
         "session_id": session_id,
         "profile": profile.model_dump(),
-        "questions": profile.ambiguities,
     }
 
 
@@ -107,7 +107,6 @@ async def submit_answers(session_id: str, body: AnswerRequest):
         if hasattr(profile, field) and value is not None:
             setattr(profile, field, value)
 
-    profile.ambiguities = []  # Clear questions once answered
     _save_profile(session_id, profile)
     return {"profile_updated": True, "profile": profile.model_dump()}
 
