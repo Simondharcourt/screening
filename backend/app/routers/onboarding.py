@@ -4,22 +4,24 @@ import logging
 import uuid
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-from typing import Optional
-
+from pydantic import BaseModel
 from app.core.config import settings
 from app.core.database import supabase
 from app.services.cv_parser_service import extract_text_from_pdf
 from app.services.profile_analyzer_service import analyze_cv
 from app.schemas.candidate import CandidateProfile, compute_completion_score
-from app.services.skill_extractor import extract_skills_from_profile
-from app.services.embedding_service import EmbeddingService
-from app.services.scraper_service import WTTJScraper
-from app.services.job_service import JobService
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
 from app.services.profile_conversation_graph import build_profile_graph
+from app.services.job_discovery_graph import (
+    search_algolia_node,
+    search_pgvector_node,
+    dedup_merge_node,
+    enrich_jit_node,
+    RankedJob,
+    JobDiscoveryState,
+)
 
 import redis as redis_lib
 logger = logging.getLogger(__name__)
@@ -38,28 +40,11 @@ POOL_TTL = 3600  # Job pool expires after 1 hour
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _pool_key(session_id: str) -> str:
-    return f"onboarding:pool:{session_id}"
-
 def _profile_key(session_id: str) -> str:
     return f"onboarding:profile:{session_id}"
 
 def _save_profile(session_id: str, profile: CandidateProfile):
     redis_client.setex(_profile_key(session_id), POOL_TTL, profile.model_dump_json())
-
-def _load_profile(session_id: str) -> Optional[CandidateProfile]:
-    raw = redis_client.get(_profile_key(session_id))
-    if not raw:
-        return None
-    return CandidateProfile.model_validate_json(raw)
-
-def _add_to_pool(session_id: str, job_ids: list[str]):
-    if job_ids:
-        redis_client.sadd(_pool_key(session_id), *job_ids)
-        redis_client.expire(_pool_key(session_id), POOL_TTL)
-
-def _get_pool(session_id: str) -> list[str]:
-    return list(redis_client.smembers(_pool_key(session_id)))
 
 
 # ── Endpoint 1: Upload CV ─────────────────────────────────────────────────────
@@ -191,181 +176,78 @@ async def patch_profile(session_id: str, body: ProfilePatch):
 
 # ── Endpoint 5: Search stream (SSE) ──────────────────────────────────────────
 
-async def _search_algolia_stream(session_id: str, search_terms: list[str]):
-    """Async generator: queries Algolia, yields SSE events as jobs are found."""
-    query = " ".join(search_terms[:5])
-    raw_jobs = await asyncio.to_thread(WTTJScraper.fetch_jobs, query, 3)
-
-    batch_size = 10
-    for i in range(0, len(raw_jobs), batch_size):
-        batch = raw_jobs[i:i + batch_size]
-        db_ids = await asyncio.to_thread(JobService.upsert_wttj_batch, batch, [])
-        _add_to_pool(session_id, [f"db:{jid}" for jid in db_ids])
-        pool_size = redis_client.scard(_pool_key(session_id))
-        yield f"event: jobs_found\ndata: {json.dumps({'source': 'algolia', 'delta': len(batch), 'total': pool_size})}\n\n"
-        await asyncio.sleep(0)
-
-
-async def _search_local_db_stream(session_id: str, profile: CandidateProfile):
-    """Async generator: queries pgvector local DB, yields SSE events."""
-    profile_text = f"{profile.job_title_target} {' '.join(profile.skills)} {profile.summary}"
-    embedding = await asyncio.to_thread(EmbeddingService.generate, profile_text)
-
-    if not embedding:
-        return
-
+async def _generate_discovery_stream(session_id: str):
+    """
+    Unified SSE stream: parallel search → JIT enrichment → LLM reranking.
+    Emits: phase, jobs_found, search_done, job_ranked, done.
+    """
+    # Load profile from Supabase (persisted by ProfileConversationGraph)
     resp = await asyncio.to_thread(
-        lambda: supabase.rpc("match_jobs_for_candidate", {
-            "query_embedding": embedding,
-            "match_threshold": 0.3,
-            "match_count": 50
-        }).execute()
+        lambda: supabase.table("candidates").select("profile").eq("id", session_id).single().execute()
     )
-
-    job_ids = [f"db:{row['id']}" for row in (resp.data or [])]
-    _add_to_pool(session_id, job_ids)
-
-    pool_size = redis_client.scard(_pool_key(session_id))
-    yield f"event: jobs_found\ndata: {json.dumps({'source': 'local_db', 'delta': len(job_ids), 'total': pool_size})}\n\n"
-
-
-async def _merge_generators(*gens):
-    """Merges multiple async generators, yielding items as they arrive."""
-    queue: asyncio.Queue = asyncio.Queue()
-
-    async def drain(gen):
-        async for item in gen:
-            await queue.put(item)
-        await queue.put(None)  # Sentinel
-
-    tasks = [asyncio.create_task(drain(g)) for g in gens]
-    finished = 0
-
-    while finished < len(tasks):
-        item = await queue.get()
-        if item is None:
-            finished += 1
-        else:
-            yield item
-
-
-async def _generate_search_stream(session_id: str):
-    """Main SSE generator for phase 2: parallel Algolia + local DB search."""
-    profile = _load_profile(session_id)
-    if not profile:
-        yield f"event: error\ndata: {json.dumps({'error': 'Session not found'})}\n\n"
+    if not resp.data or not resp.data.get("profile"):
+        yield f"event: error\ndata: {json.dumps({'error': 'Profile not found'})}\n\n"
         return
 
-    yield f'event: phase\ndata: {json.dumps({"id": 2, "label": "Recherche d\'offres en cours..."})}\n\n'
+    profile = resp.data["profile"]
+    yield "event: phase\ndata: " + json.dumps({"id": 1, "label": "Recherche d'offres..."}) + "\n\n"
 
-    search_terms = await asyncio.to_thread(
-        extract_skills_from_profile,
-        f"{profile.job_title_target} {' '.join(profile.skills)}"
+    state: JobDiscoveryState = {
+        "session_id": session_id,
+        "profile": profile,
+        "algolia_jobs": [],
+        "pgvector_jobs": [],
+        "merged_jobs": [],
+        "enriched_jobs": [],
+        "ranked_jobs": [],
+    }
+
+    # Parallel search
+    algolia_result, pgvector_result = await asyncio.gather(
+        asyncio.to_thread(search_algolia_node, state),
+        asyncio.to_thread(search_pgvector_node, state),
     )
+    state["algolia_jobs"] = algolia_result["algolia_jobs"]
+    state["pgvector_jobs"] = pgvector_result["pgvector_jobs"]
 
-    async for event in _merge_generators(
-        _search_algolia_stream(session_id, search_terms),
-        _search_local_db_stream(session_id, profile)
-    ):
-        yield event
+    total = len(state["algolia_jobs"]) + len(state["pgvector_jobs"])
+    yield f"event: jobs_found\ndata: {json.dumps({'source': 'algolia', 'delta': len(state['algolia_jobs']), 'total': total})}\n\n"
+    yield f"event: jobs_found\ndata: {json.dumps({'source': 'local_db', 'delta': len(state['pgvector_jobs']), 'total': total})}\n\n"
 
-    total = redis_client.scard(_pool_key(session_id))
-    yield f"event: search_done\ndata: {json.dumps({'total': total})}\n\n"
-    yield "event: done\ndata: {}\n\n"
+    # Dedup + enrich
+    state.update(await asyncio.to_thread(dedup_merge_node, state))
+    yield f"event: search_done\ndata: {json.dumps({'total': len(state['merged_jobs'])})}\n\n"
 
+    state.update(await asyncio.to_thread(enrich_jit_node, state))
 
-@router.get("/search-stream/{session_id}")
-async def search_stream(session_id: str):
-    """SSE endpoint: runs Algolia + local DB search in parallel, streams job counts."""
-    return StreamingResponse(
-        _generate_search_stream(session_id),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-    )
+    yield f"event: phase\ndata: {json.dumps({'id': 3, 'label': 'Sélection des meilleures offres...', 'total': len(state['enriched_jobs'])})}\n\n"
 
-
-# ── Endpoint 6: Rank stream (SSE) ─────────────────────────────────────────────
-
-class RankedJob(BaseModel):
-    score: int = Field(description="Score de compatibilité 0-100")
-    strengths: list[str] = Field(description="2-3 points forts du matching")
-    weaknesses: list[str] = Field(description="1-2 points faibles ou manquants")
-    justification: str = Field(description="Explication courte du score en 1-2 phrases")
-
-
-async def _generate_rank_stream(session_id: str):
-    """SSE generator for phase 3: LLM reranking of job pool."""
-    profile = _load_profile(session_id)
-    if not profile:
-        yield f"event: error\ndata: {json.dumps({'error': 'Session not found'})}\n\n"
-        return
-
-    pool_ids = _get_pool(session_id)
-    if not pool_ids:
-        yield f"event: error\ndata: {json.dumps({'error': 'Aucune offre trouvée'})}\n\n"
-        return
-
-    yield f"event: phase\ndata: {json.dumps({'id': 3, 'label': 'Sélection des meilleures offres...', 'total': len(pool_ids)})}\n\n"
-
-    # Take top 10 IDs from the pool (already sorted by pgvector similarity)
-    db_ids = [pid.replace("db:", "") for pid in pool_ids if pid.startswith("db:")][:10]
-
-    jobs_resp = await asyncio.to_thread(
-        lambda: supabase.table("job_postings")
-            .select("id, title, description, external_url, source")
-            .in_("id", db_ids)
-            .eq("status", "active")
-            .execute()
-    )
-    jobs = jobs_resp.data or []
-
-    if not jobs:
-        yield f"event: error\ndata: {json.dumps({'error': 'Impossible de charger les offres'})}\n\n"
-        return
-
+    # Rerank — stream each job as scored
+    cp = CandidateProfile.model_validate(profile)
     profile_text = (
-        f"Poste visé: {profile.job_title_target}\n"
-        f"Expérience: {profile.experience_years or '?'} ans\n"
-        f"Compétences: {', '.join(profile.skills)}\n"
-        f"Localisation: {profile.location_pref or 'flexible'}\n"
-        f"Remote: {profile.remote_pref or 'flexible'}\n"
-        f"Salaire min: {profile.salary_min or 'non précisé'} €\n"
-        f"Résumé: {profile.summary}"
+        f"Poste visé: {cp.job_title_target}\nExpérience: {cp.experience_years or '?'} ans\n"
+        f"Compétences: {', '.join(cp.skills)}\nAspirations: {cp.aspirations or 'non précisé'}\n"
+        f"Valeurs: {', '.join(cp.values) or 'non précisé'}\nRésumé: {cp.summary}"
     )
-
     llm = ChatAnthropic(
-        model=settings.LLM_MODEL_FAST,  # Haiku: 10x cheaper, sufficient for ranking
+        model=settings.LLM_MODEL_FAST,
         temperature=0,
         max_tokens=512,
-        api_key=settings.ANTHROPIC_API_KEY
+        api_key=settings.ANTHROPIC_API_KEY,
     )
-    structured_llm = llm.with_structured_output(RankedJob)
+    chain = ChatPromptTemplate.from_messages([
+        ("system", "Tu es un expert RH. Évalue la compatibilité entre ce candidat et cette offre. Score de 0 à 100."),
+        ("human", "Profil:\n{profile}\n\nOffre ({title}):\n{description}\n\nÉvalue la compatibilité."),
+    ]) | llm.with_structured_output(RankedJob)
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system",
-         "Tu es un expert RH. Évalue la compatibilité entre ce candidat et cette offre. "
-         "Sois direct et précis. Score de 0 à 100."),
-        ("human",
-         "Profil candidat:\n{profile}\n\n"
-         "Offre d'emploi ({title}):\n{description}\n\n"
-         "Évalue la compatibilité."),
-    ])
-    chain = prompt | structured_llm
-
-    # Stream each result immediately as it's scored — no buffering
     rank = 0
-    total_jobs = len(jobs)
-    for job in jobs:
+    for job in state["enriched_jobs"]:
         try:
-            logger.info(f"[rank-stream] scoring job {rank+1}/{total_jobs}: '{job['title']}'")
-            result: RankedJob = await asyncio.to_thread(
-                chain.invoke, {
-                    "profile": profile_text,
-                    "title": job["title"],
-                    "description": (job.get("description") or "")[:2000],
-                }
-            )
-            logger.info(f"[rank-stream] job {rank+1}/{total_jobs} score={result.score}/100")
+            result: RankedJob = await asyncio.to_thread(chain.invoke, {
+                "profile": profile_text,
+                "title": job["title"],
+                "description": (job.get("description") or "")[:2000],
+            })
             rank += 1
             payload = {
                 "rank": rank,
@@ -383,17 +265,16 @@ async def _generate_rank_stream(session_id: str):
             }
             yield f"event: job_ranked\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
         except Exception as e:
-            logger.error(f"Ranking failed for job {job['id']}: {e}")
-            continue
+            logger.error(f"[discovery-stream] ranking failed for {job.get('id')}: {e}")
 
     yield f"event: done\ndata: {json.dumps({'total': rank})}\n\n"
 
 
-@router.get("/rank-stream/{session_id}")
-async def rank_stream(session_id: str):
-    """SSE endpoint: LLM reranks job pool, streams top 10 ranked jobs."""
+@router.get("/search-stream/{session_id}")
+async def search_stream(session_id: str):
+    """Unified SSE: parallel search → JIT enrichment → LLM reranking."""
     return StreamingResponse(
-        _generate_rank_stream(session_id),
+        _generate_discovery_stream(session_id),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
