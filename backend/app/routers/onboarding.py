@@ -4,6 +4,7 @@ import logging
 import uuid
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
+from typing import Any
 from pydantic import BaseModel
 from app.core.config import settings
 from app.core.database import supabase
@@ -148,7 +149,7 @@ async def get_profile(session_id: str):
 
 
 class ProfilePatch(BaseModel):
-    updates: dict  # {field: value}
+    updates: dict[str, Any]
 
 @router.patch("/profile/{session_id}")
 async def patch_profile(session_id: str, body: ProfilePatch):

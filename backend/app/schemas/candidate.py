@@ -1,8 +1,10 @@
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Optional, Any
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CandidateProfile(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     # Hard criteria
     job_title_target: str = Field(description="Titre de poste visé")
     experience_years: Optional[int] = Field(None, description="Années d'expérience")
