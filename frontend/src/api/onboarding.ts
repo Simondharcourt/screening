@@ -7,14 +7,28 @@ export interface CandidateProfile {
   location_pref?: string
   remote_pref?: string
   salary_min?: number
+  contract_type?: string
+  aspirations?: string
+  values: string[]
+  preferred_sector: string[]
+  preferred_team_size?: string
+  dislikes?: string
   summary: string
-  ambiguities: string[]
+  completion_score: number
 }
 
 export interface UploadResponse {
   session_id: string
   profile: CandidateProfile
-  questions: string[]
+  question: string | null
+  completion_score: number
+}
+
+export interface AnswerResponse {
+  profile: CandidateProfile
+  question: string | null
+  completion_score: number
+  is_complete: boolean
 }
 
 export interface RankedJobResult {
@@ -62,21 +76,40 @@ export async function uploadCv(file: File): Promise<UploadResponse> {
   return response.json()
 }
 
-export async function submitAnswers(
+export async function submitAnswer(
   sessionId: string,
-  answers: Record<string, string | number>
-): Promise<{ profile_updated: boolean; profile: CandidateProfile }> {
+  answer: string
+): Promise<AnswerResponse> {
   const response = await fetch(`${API_BASE_URL}/onboarding/answer/${sessionId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answers }),
+    body: JSON.stringify({ answer }),
   })
-
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
-    throw new Error(error.detail || 'Failed to submit answers')
+    throw new Error(error.detail || 'Failed to submit answer')
   }
+  return response.json()
+}
 
+export async function skipOnboarding(sessionId: string): Promise<{ profile: CandidateProfile }> {
+  const response = await fetch(`${API_BASE_URL}/onboarding/skip/${sessionId}`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error('Skip failed')
+  return response.json()
+}
+
+export async function patchProfile(
+  sessionId: string,
+  updates: Partial<CandidateProfile>
+): Promise<{ profile: CandidateProfile }> {
+  const response = await fetch(`${API_BASE_URL}/onboarding/profile/${sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates }),
+  })
+  if (!response.ok) throw new Error('Patch failed')
   return response.json()
 }
 
@@ -157,5 +190,4 @@ export function openRankStream(
     },
     onError
   )
-}
 }
