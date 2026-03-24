@@ -6,6 +6,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from typing import Dict, Any, List
 from app.core.config import settings
+from app.services.jit_enrichment_service import JITEnrichmentService
 
 router = APIRouter(prefix="/matching", tags=["Matching"])
 
@@ -29,7 +30,17 @@ def analyze_fit(request: MatchScoreRequest):
     if not job:
          raise HTTPException(status_code=404, detail="Job not found")
 
-    # 2. Fetch Candidate
+    # 2. JIT enrichment: enrich if needed, mark closed if URL dead
+    if not job.get("has_full_description") and job.get("external_url"):
+        success = JITEnrichmentService.enrich_job(job["id"], job["external_url"])
+        if not success:
+            raise HTTPException(status_code=410, detail="Job offer is no longer available")
+        job = JobService.get_job(request.job_id)  # reload with description_full
+
+    # 3. Use description_full if available, fallback to description
+    job_description = job.get("description_full") or job.get("description", "")
+
+    # 4. Fetch Candidate
     cand_resp = supabase.table("candidates").select("*").eq("id", request.candidate_id).execute()
     if not cand_resp.data:
          raise HTTPException(status_code=404, detail="Candidate not found")
@@ -45,7 +56,7 @@ def analyze_fit(request: MatchScoreRequest):
     screening_id = screen_resp.data[0]["id"]
 
     # 4. Prompt the LLM
-    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0)
+    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0, api_key=settings.ANTHROPIC_API_KEY)
     structured_llm = llm.with_structured_output(MatchScoreResponse)
     
     prompt = ChatPromptTemplate.from_messages([
@@ -61,7 +72,7 @@ def analyze_fit(request: MatchScoreRequest):
     
     response: MatchScoreResponse = chain.invoke({
         "job_title": job["title"],
-        "job_desc": job.get("description", ""),
+        "job_desc": job_description,
         "job_questions": "\n".join(job.get("questions", [])),
         "cand_name": candidate["name"],
         "cand_profile": candidate.get("profile_text", "")

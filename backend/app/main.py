@@ -6,6 +6,9 @@ import os
 # Explicitly load .env into os.environ so all external libraries find their keys
 load_dotenv()
 
+from app.core.langfuse_helper import init_langfuse
+init_langfuse()
+
 app = FastAPI(
     title="HR AI Screening Platform API",
     description="Backend API for the HR AI Screening Platform",
@@ -21,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-from app.routers import jobs, candidates, chat, matching, vapi
+from app.routers import jobs, candidates, chat, matching, vapi, onboarding
 
 @app.get("/")
 async def root():
@@ -32,6 +35,7 @@ app.include_router(candidates.router)
 app.include_router(chat.router)
 app.include_router(matching.router)
 app.include_router(vapi.router)
+app.include_router(onboarding.router)
 
 @app.get("/health")
 async def health_check():

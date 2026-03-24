@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from typing import List, Optional
 from app.schemas.candidates import CandidateCreate, CandidateResponse, CandidateWithScreening
 from app.services.candidate_service import CandidateService
+from app.worker.tasks import enrich_jobs_for_candidate
 import uuid
 import json
 
@@ -34,6 +35,14 @@ async def create_candidate(
             cv_url = cv_path
             
         result = CandidateService.create_candidate_with_screening(candidate_data, cv_url)
+        
+        profile_text = candidate_data.profile_text or ""
+        if profile_text.strip():
+            enrich_jobs_for_candidate.delay(
+                str(result["candidate"]["id"]),
+                profile_text,
+            )
+
         return result
         
     except Exception as e:

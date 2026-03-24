@@ -3,7 +3,7 @@ from app.worker.celery_app import celery_app
 from app.services.scraper_service import WTTJScraper
 from app.services.ft_scraper_service import FrancetravailScraper
 from app.services.job_service import JobService
-from app.schemas.jobs import JobPostingCreate
+from app.services.skill_extractor import extract_skills_from_profile
 
 logger = logging.getLogger(__name__)
 
@@ -13,19 +13,7 @@ def fetch_wttj_jobs(query: str = "developpeur", nb_pages: int = 1):
     logger.info(f"Starting WTTJ job fetch: query='{query}', nb_pages={nb_pages}")
     raw_jobs = WTTJScraper.fetch_jobs(query=query, nb_pages=nb_pages)
 
-    upserted_count = 0
-    for tj in raw_jobs:
-        external_id = str(tj.get("id") or "")
-        if not external_id:
-            continue
-        job_data = JobPostingCreate(
-            title=tj.get("title", "Poste inconnu"),
-            description=tj.get("description", ""),
-            questions=["Parlez-moi de votre parcours technique.", "Pourquoi postuler chez nous ?"]
-        )
-        JobService.upsert_scraped_job(job_data, source="wttj", external_id=external_id)
-        upserted_count += 1
-
+    upserted_count = len(JobService.upsert_wttj_batch(raw_jobs))
     logger.info(f"Finished WTTJ job fetch. Upserted {upserted_count} jobs.")
     return {"status": "success", "source": "wttj", "upserted": upserted_count}
 
@@ -69,3 +57,25 @@ def cleanup_stale_jobs():
         total += closed
     logger.info(f"Cleanup done. Total closed: {total}")
     return {"status": "success", "closed": total}
+
+
+@celery_app.task(name="app.worker.tasks.enrich_jobs_for_candidate")
+def enrich_jobs_for_candidate(candidate_id: str, profile_text: str):
+    """
+    Layer 2: Triggered when a candidate profile is created.
+    1. Calls the LLM to extract structured skills + target job title from the profile.
+    2. Runs a targeted Algolia search using those terms.
+    3. Upserts the results to the DB (deduplicates by external_id).
+    """
+    logger.info(f"Starting targeted WTTJ search for candidate {candidate_id}")
+
+    # Step 1: LLM-based skill extraction (precise, no stop-word noise)
+    search_terms = extract_skills_from_profile(profile_text)
+    query = " ".join(search_terms[:5])  # Max 5 terms to keep Algolia query focused
+    logger.info(f"Algolia query for candidate {candidate_id}: '{query}'")
+
+    raw_jobs = WTTJScraper.fetch_jobs(query=query, nb_pages=2)
+
+    upserted = len(JobService.upsert_wttj_batch(raw_jobs))
+    logger.info(f"Targeted fetch done for candidate {candidate_id}: {upserted} jobs upserted")
+    return {"status": "success", "candidate_id": candidate_id, "upserted": upserted}

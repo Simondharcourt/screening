@@ -25,7 +25,7 @@ class CoachAgentState(TypedDict):
 def extraction_node(state: CoachAgentState) -> Dict[str, Any]:
     """Reads the conversation history so far and attempts to update the extracted profile."""
     # We only need to run this if there are messages. We use a separate LLM call to parse.
-    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0)
+    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0, api_key=settings.ANTHROPIC_API_KEY)
     structured_llm = llm.with_structured_output(ExtractedProfile)
     
     prompt = ChatPromptTemplate.from_messages([
@@ -50,7 +50,7 @@ def extraction_node(state: CoachAgentState) -> Dict[str, Any]:
 
 def chat_node(state: CoachAgentState) -> Dict[str, Any]:
     """Generates the next response to the user based on missing profile data."""
-    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0.7)
+    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0.7, api_key=settings.ANTHROPIC_API_KEY)
     
     # We serialize the extracted profile to let the LLM know what it still needs to ask
     current_profile = state.get("extracted_profile", ExtractedProfile())

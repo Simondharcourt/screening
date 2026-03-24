@@ -21,7 +21,7 @@ class QuestionsOutput(LangchainBaseModel):
 # --- 3. Define Nodes ---
 def generate_description_node(state: JobAgentState) -> Dict[str, Any]:
     """Generates the full job description based on title and bullet points."""
-    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0.7)
+    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0.7, api_key=settings.ANTHROPIC_API_KEY)
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", "You are an expert HR copywriter. Create a professional, engaging job description. "
@@ -41,7 +41,7 @@ def generate_description_node(state: JobAgentState) -> Dict[str, Any]:
 def generate_questions_node(state: JobAgentState) -> Dict[str, Any]:
     """Extracts 5 pre-qualification screening questions from the description."""
     # Using temperature 0 for more deterministic, focused questions
-    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0)
+    llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0, api_key=settings.ANTHROPIC_API_KEY)
     
     # Bind the LLM to output the structured Pydantic model
     structured_llm = llm.with_structured_output(QuestionsOutput)

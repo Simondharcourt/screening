@@ -23,6 +23,8 @@ class JobPostingResponse(JobPostingBase):
     id: uuid.UUID
     recruiter_id: Optional[uuid.UUID] = None
     external_id: Optional[str] = None
+    external_url: Optional[str] = None
+    has_full_description: Optional[bool] = False
     created_at: datetime
     
     class Config:

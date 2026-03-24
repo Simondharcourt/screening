@@ -102,6 +102,7 @@ class WTTJScraper:
                         "id": ext_id,
                         "title": j.get("name", "Poste inconnu"),
                         "description": "\n\n".join(parts),
+                        "external_url": link,
                     })
 
             except Exception as e:

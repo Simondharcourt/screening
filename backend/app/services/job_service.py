@@ -56,6 +56,7 @@ class JobService:
         source: str,
         external_id: str,
         expires_at: Optional[str] = None,
+        external_url: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Upserts a job posting from an external source.
@@ -69,6 +70,8 @@ class JobService:
         data["last_seen_at"] = datetime.now(timezone.utc).isoformat()
         if expires_at:
             data["expires_at"] = expires_at
+        if external_url:
+            data["external_url"] = external_url
 
         existing_resp = supabase.table("job_postings").select("*").eq("source", source).eq("external_id", external_id).execute()
 
@@ -86,6 +89,34 @@ class JobService:
             response = supabase.table("job_postings").insert(data).execute()
 
         return response.data[0] if response.data else None
+
+    @staticmethod
+    def upsert_wttj_batch(
+        raw_jobs: List[Dict[str, Any]],
+        questions: Optional[List[str]] = None,
+    ) -> List[str]:
+        """
+        Upserts a list of raw WTTJ jobs (from Algolia). Returns DB IDs of upserted jobs.
+        questions defaults to standard WTTJ screening questions.
+        """
+        if questions is None:
+            questions = ["Parlez-moi de votre parcours technique.", "Pourquoi postuler chez nous ?"]
+        ids = []
+        for tj in raw_jobs:
+            external_id = str(tj.get("id") or "")
+            if not external_id:
+                continue
+            job_data = JobPostingCreate(
+                title=tj.get("title", "Poste inconnu"),
+                description=tj.get("description", ""),
+                questions=questions,
+            )
+            result = JobService.upsert_scraped_job(
+                job_data, "wttj", external_id, external_url=tj.get("external_url")
+            )
+            if result:
+                ids.append(result["id"])
+        return ids
 
     @staticmethod
     def close_stale_jobs(source: str, stale_after_days: int = 7) -> int:

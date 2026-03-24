@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     
     # LLM Settings
     LLM_MODEL: str = "claude-sonnet-4-6"
+    LLM_MODEL_FAST: str = "claude-haiku-4-5-20251001"  # For high-volume / repetitive tasks
 
     # Scraping & Worker
     REDIS_URL: str = "redis://localhost:6379/0"

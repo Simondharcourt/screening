@@ -73,6 +73,12 @@ function RootComponent() {
                                     Offres d'emploi
                                 </Link>
                                 <Link
+                                    to="/candidate/onboarding"
+                                    className="px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-lg shadow-sm transition-all shadow-indigo-500/30 font-semibold tracking-wide"
+                                >
+                                    Espace Candidat
+                                </Link>
+                                <Link
                                     to="/"
                                     className="px-4 py-1.5 text-sm font-medium text-white bg-surface-900 hover:bg-surface-800 rounded-lg shadow-sm transition-colors"
                                 >

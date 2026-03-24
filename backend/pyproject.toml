@@ -22,4 +22,15 @@ dependencies = [
     "supabase>=2.28.0",
     "uvicorn>=0.41.0",
     "python-multipart>=0.0.22",
+    "pypdf>=6.9.1",
+    "langfuse>=4.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "curl-cffi>=0.14.0",
+    "envguardx>=0.2.0",
+    "patchright>=1.58.2",
+    "playwright>=1.58.0",
+    "scrapling[all]>=0.2.0",
 ]
