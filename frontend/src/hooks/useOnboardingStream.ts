@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   uploadCv as apiUploadCv,
-  submitAnswers as apiSubmitAnswers,
+  submitAnswer as apiSubmitAnswer,
+  skipOnboarding as apiSkipOnboarding,
   openSearchStream,
   openRankStream,
   type CandidateProfile,
@@ -13,7 +14,8 @@ export type Phase = 'idle' | 'uploading' | 'profiling' | 'searching' | 'answerin
 export interface OnboardingState {
   phase: Phase
   profile: CandidateProfile | null
-  questions: string[]
+  currentQuestion: string | null
+  completionScore: number
   jobsTotal: number
   jobSources: Record<string, number>
   rankedJobs: RankedJobResult[]
@@ -24,7 +26,8 @@ export function useOnboardingStream() {
   const [state, setState] = useState<OnboardingState>({
     phase: 'idle',
     profile: null,
-    questions: [],
+    currentQuestion: null,
+    completionScore: 0,
     jobsTotal: 0,
     jobSources: {},
     rankedJobs: [],
@@ -44,7 +47,8 @@ export function useOnboardingStream() {
         ...prev,
         phase: 'profiling',
         profile: result.profile,
-        questions: result.questions,
+        currentQuestion: result.question,
+        completionScore: result.profile.completion_score,
       }))
 
       // Start search in background immediately (parallel with questions)
@@ -54,18 +58,14 @@ export function useOnboardingStream() {
           if (event.type === 'jobs_found') {
             setState(prev => ({
               ...prev,
-              // Transition to 'searching' on first job batch so counter appears
               phase: prev.phase === 'profiling' ? 'searching' : prev.phase,
               jobsTotal: event.total,
               jobSources: { ...prev.jobSources, [event.source]: (prev.jobSources[event.source] ?? 0) + event.delta },
             }))
           } else if (event.type === 'search_done') {
-            // Phase stays as-is: CTA appears when questions.length === 0 AND phase === 'answering'
-            // If user already submitted answers → they're already in 'answering', CTA shows
-            // If user hasn't answered yet → phase is 'searching', CTA stays hidden until submitAnswers
             setState(prev => ({
               ...prev,
-              phase: prev.questions.length === 0 ? 'answering' : prev.phase,
+              phase: prev.currentQuestion === null ? 'answering' : prev.phase,
             }))
           }
         }
@@ -76,15 +76,29 @@ export function useOnboardingStream() {
     }
   }, [])
 
-  const submitAnswers = useCallback(async (answers: Record<string, string | number>) => {
+  const submitAnswer = useCallback(async (answer: string) => {
     const sessionId = sessionIdRef.current
     if (!sessionId) return
+    setState(prev => ({ ...prev, error: null }))
     try {
-      await apiSubmitAnswers(sessionId, answers)
-      setState(prev => ({ ...prev, questions: [], phase: 'answering' }))
+      const result = await apiSubmitAnswer(sessionId, answer)
+      setState(prev => ({
+        ...prev,
+        profile: result.profile,
+        currentQuestion: result.question,
+        completionScore: result.completion_score,
+        phase: result.is_complete || !result.question ? 'answering' : prev.phase,
+      }))
     } catch (e: unknown) {
       setState(prev => ({ ...prev, error: e instanceof Error ? e.message : 'Erreur' }))
     }
+  }, [])
+
+  const skipOnboarding = useCallback(async () => {
+    const sessionId = sessionIdRef.current
+    if (!sessionId) return
+    await apiSkipOnboarding(sessionId)
+    setState(prev => ({ ...prev, currentQuestion: null, phase: 'answering' }))
   }, [])
 
   const startRanking = useCallback(() => {
@@ -110,5 +124,5 @@ export function useOnboardingStream() {
     closeRankRef.current?.()
   }, [])
 
-  return { state, uploadCv, submitAnswers, startRanking, cleanup }
+  return { state, uploadCv, submitAnswer, skipOnboarding, startRanking, cleanup }
 }

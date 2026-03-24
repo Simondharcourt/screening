@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { useOnboardingStream, type Phase } from '../../hooks/useOnboardingStream'
 import { CvUploadZone } from '../../components/onboarding/CvUploadZone'
 import { ProfilePanel } from '../../components/onboarding/ProfilePanel'
-import { QuestionsPanel } from '../../components/onboarding/QuestionsPanel'
+import { QuestionCard } from '../../components/onboarding/QuestionCard'
 import { JobsCounter } from '../../components/onboarding/JobsCounter'
 import { RankedJobCard } from '../../components/onboarding/RankedJobCard'
 
@@ -32,7 +32,7 @@ const PHASE_TITLES: Record<Phase, string> = {
 }
 
 function CandidateOnboarding() {
-  const { state, uploadCv, submitAnswers, startRanking, cleanup } = useOnboardingStream()
+  const { state, uploadCv, submitAnswer, skipOnboarding, startRanking, cleanup } = useOnboardingStream()
   
   useEffect(() => {
     return () => cleanup()
@@ -40,7 +40,7 @@ function CandidateOnboarding() {
 
   const gradient = PHASE_GRADIENTS[state.phase]
   const showCounter = state.jobsTotal > 0
-  const showStartRankingCta = state.phase === 'answering' && state.questions.length === 0
+  const showStartRankingCta = state.phase === 'answering' && state.currentQuestion === null
 
   return (
     <div className={`min-h-[calc(100vh-64px)] w-full bg-gradient-to-br ${gradient} transition-all duration-[1500ms] ease-in-out relative flex flex-col`}>
@@ -78,16 +78,18 @@ function CandidateOnboarding() {
           </div>
         )}
 
-        {/* Phase 1→2 — Profile + Questions */}
+        {/* Phase 1→2 — Profile + Question */}
         {state.profile && !['ranking', 'results'].includes(state.phase) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 items-stretch animate-slide-up">
-            <div className="h-full">
-              <ProfilePanel profile={state.profile} />
-            </div>
-            {state.questions.length > 0 && (
-              <div className="h-full">
-                <QuestionsPanel questions={state.questions} onSubmit={submitAnswers} />
-              </div>
+            <ProfilePanel profile={state.profile} />
+            {state.currentQuestion && (
+              <QuestionCard
+                question={state.currentQuestion}
+                completionScore={state.completionScore}
+                onSubmit={submitAnswer}
+                onSkip={skipOnboarding}
+                isLoading={false}
+              />
             )}
           </div>
         )}
