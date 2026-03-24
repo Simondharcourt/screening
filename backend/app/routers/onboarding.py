@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import supabase
 from app.services.cv_parser_service import extract_text_from_pdf
 from app.services.profile_analyzer_service import analyze_cv
-from app.schemas.candidate import CandidateProfile
+from app.schemas.candidate import CandidateProfile, compute_completion_score
 from app.services.skill_extractor import extract_skills_from_profile
 from app.services.embedding_service import EmbeddingService
 from app.services.scraper_service import WTTJScraper
@@ -29,8 +29,9 @@ router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 # Redis client (same connection as Celery)
 redis_client = redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
 
-# Graph singleton — built once on module load
-_profile_graph = build_profile_graph(settings.REDIS_URL)
+# Graph singleton — built once on module load.
+# checkpointer.setup() is called at app startup (see main.py lifespan).
+_profile_graph, _checkpointer = build_profile_graph(settings.REDIS_URL)
 
 POOL_TTL = 3600  # Job pool expires after 1 hour
 
@@ -79,11 +80,16 @@ async def upload_cv(file: UploadFile = File(...)):
     profile = await asyncio.to_thread(analyze_cv, cv_text)
 
     # Create candidate row in Supabase
-    supabase.table("candidates").insert({
-        "id": session_id,
-        "profile": profile.model_dump(),
-        "onboarding_complete": False,
-    }).execute()
+    await asyncio.to_thread(
+        lambda: supabase.table("candidates").insert({
+            "id": session_id,
+            "profile": profile.model_dump(),
+            "onboarding_complete": False,
+        }).execute()
+    )
+
+    # Save profile to Redis so SSE stream endpoints can access it
+    _save_profile(session_id, profile)
 
     # Initialize LangGraph state and run to first question
     config = {"configurable": {"thread_id": session_id}}
@@ -113,11 +119,15 @@ class AnswerRequest(BaseModel):
 @router.post("/answer/{session_id}")
 async def submit_answer(session_id: str, body: AnswerRequest):
     config = {"configurable": {"thread_id": session_id}}
-    result = await asyncio.to_thread(
-        _profile_graph.invoke,
-        Command(resume=body.answer),
-        config,
-    )
+    try:
+        result = await asyncio.to_thread(
+            _profile_graph.invoke,
+            Command(resume=body.answer),
+            config,
+        )
+    except Exception as e:
+        logger.error(f"[submit_answer] session={session_id} error: {e}")
+        raise HTTPException(status_code=404, detail="Session not found or already complete")
     return {
         "profile": result["profile"],
         "question": result.get("current_question"),
@@ -133,8 +143,10 @@ async def skip_to_results(session_id: str):
     """Finalize profile immediately, skipping remaining questions."""
     config = {"configurable": {"thread_id": session_id}}
     snapshot = _profile_graph.get_state(config)
-    if not snapshot:
+    if not snapshot.values:
         raise HTTPException(status_code=404, detail="Session not found")
+    if not snapshot.next:
+        raise HTTPException(status_code=400, detail="Session already complete or not started")
 
     # Update graph state: set is_complete=True so gap_analyzer routes to finalize
     _profile_graph.update_state(config, {"is_complete": True})
@@ -171,7 +183,6 @@ async def patch_profile(session_id: str, body: ProfilePatch):
         if hasattr(profile, field):
             setattr(profile, field, value)
 
-    from app.schemas.candidate import compute_completion_score
     profile.completion_score = compute_completion_score(profile)
 
     supabase.table("candidates").update({"profile": profile.model_dump()}).eq("id", session_id).execute()

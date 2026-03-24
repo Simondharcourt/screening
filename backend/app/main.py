@@ -1,7 +1,10 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Explicitly load .env into os.environ so all external libraries find their keys
 load_dotenv()
@@ -9,10 +12,24 @@ load_dotenv()
 from app.core.langfuse_helper import init_langfuse
 init_langfuse()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize Redis search indexes for the LangGraph checkpointer
+    try:
+        from app.routers.onboarding import _checkpointer
+        _checkpointer.setup()
+        logger.info("RedisSaver indexes initialized")
+    except Exception as e:
+        logger.warning(f"RedisSaver setup failed (Redis may be unavailable): {e}")
+    yield
+
+
 app = FastAPI(
     title="HR AI Screening Platform API",
     description="Backend API for the HR AI Screening Platform",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Configure CORS
