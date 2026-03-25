@@ -220,14 +220,15 @@ def route_after_gap(state: ProfileConversationState) -> str:
 
 # ── Graph builder ─────────────────────────────────────────────────────────────
 
-def build_profile_graph(redis_url: str):
+def build_profile_graph(redis_url: str = None, checkpointer=None, no_checkpointer: bool = False):
     """Builds and compiles the ProfileConversationGraph with Redis checkpointer.
 
     Returns (compiled_graph, checkpointer). The caller must call checkpointer.setup()
     once at application startup (when Redis is available) to create the required indexes.
+    Pass no_checkpointer=True for LangGraph Studio (Studio handles persistence itself).
     """
-    # Construct directly without context manager so the connection persists for the app lifetime.
-    checkpointer = RedisSaver(redis_url=redis_url)
+    if not no_checkpointer and checkpointer is None:
+        checkpointer = RedisSaver(redis_url=redis_url)
 
     builder = StateGraph(ProfileConversationState)
     builder.add_node("gap_analyzer", gap_analyzer_node)
