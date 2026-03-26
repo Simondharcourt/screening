@@ -21,5 +21,11 @@ celerybeat-schedule-wal
 # HuggingFace model cache
 .cache/
 
+# LangGraph Studio local state
+.langgraph_api/
+
+# Redis dump
+dump.rdb
+
 # OS
 .DS_Store

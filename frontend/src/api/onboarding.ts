@@ -7,14 +7,27 @@ export interface CandidateProfile {
   location_pref?: string
   remote_pref?: string
   salary_min?: number
+  contract_type?: string
+  aspirations?: string
+  values: string[]
+  preferred_sector: string[]
+  preferred_team_size?: string
+  dislikes?: string
   summary: string
-  ambiguities: string[]
+  completion_score: number
 }
 
 export interface UploadResponse {
   session_id: string
   profile: CandidateProfile
-  questions: string[]
+  question: string | null
+}
+
+export interface AnswerResponse {
+  profile: CandidateProfile
+  question: string | null
+  completion_score: number
+  is_complete: boolean
 }
 
 export interface RankedJobResult {
@@ -33,14 +46,9 @@ export interface RankedJobResult {
 }
 
 export type SSESearchEvent =
-  | { type: 'phase'; id: number; label: string }
+  | { type: 'phase'; id: number; label: string; total?: number }
   | { type: 'jobs_found'; source: string; delta: number; total: number }
   | { type: 'search_done'; total: number }
-  | { type: 'done' }
-  | { type: 'error'; error: string }
-
-export type SSERankEvent =
-  | { type: 'phase'; id: number; label: string; total: number }
   | { type: 'job_ranked'; data: RankedJobResult }
   | { type: 'done'; total: number }
   | { type: 'error'; error: string }
@@ -62,21 +70,46 @@ export async function uploadCv(file: File): Promise<UploadResponse> {
   return response.json()
 }
 
-export async function submitAnswers(
+export async function submitAnswer(
   sessionId: string,
-  answers: Record<string, string | number>
-): Promise<{ profile_updated: boolean; profile: CandidateProfile }> {
+  answer: string
+): Promise<AnswerResponse> {
   const response = await fetch(`${API_BASE_URL}/onboarding/answer/${sessionId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answers }),
+    body: JSON.stringify({ answer }),
   })
-
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
-    throw new Error(error.detail || 'Failed to submit answers')
+    throw new Error(error.detail || 'Failed to submit answer')
   }
+  return response.json()
+}
 
+export async function skipOnboarding(sessionId: string): Promise<{ profile: CandidateProfile }> {
+  const response = await fetch(`${API_BASE_URL}/onboarding/skip/${sessionId}`, {
+    method: 'POST',
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'Skip failed')
+  }
+  return response.json()
+}
+
+export async function patchProfile(
+  sessionId: string,
+  updates: Partial<CandidateProfile>
+): Promise<{ profile: CandidateProfile }> {
+  const response = await fetch(`${API_BASE_URL}/onboarding/profile/${sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'Patch failed')
+  }
   return response.json()
 }
 
@@ -95,6 +128,8 @@ function openSSEStream(
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      // eventName persists across chunks so event: and data: can be in different read() calls
+      let eventName = ''
 
       while (true) {
         const { done, value } = await reader.read()
@@ -104,12 +139,14 @@ function openSSEStream(
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
 
-        let eventName = ''
         for (const line of lines) {
           if (line.startsWith('event: ')) {
             eventName = line.slice(7).trim()
           } else if (line.startsWith('data: ') && eventName) {
             try { onEvent(eventName, JSON.parse(line.slice(6))) } catch { /* ignore malformed JSON */ }
+            eventName = ''
+          } else if (line === '') {
+            // Blank line = end of SSE frame; reset in case data: never arrived
             eventName = ''
           }
         }
@@ -134,28 +171,10 @@ export function openSearchStream(
       if (eventName === 'phase') onEvent({ type: 'phase', ...d } as SSESearchEvent)
       else if (eventName === 'jobs_found') onEvent({ type: 'jobs_found', ...d } as SSESearchEvent)
       else if (eventName === 'search_done') onEvent({ type: 'search_done', ...d } as SSESearchEvent)
-      else if (eventName === 'done') onEvent({ type: 'done' })
+      else if (eventName === 'job_ranked') onEvent({ type: 'job_ranked', data: data as RankedJobResult })
+      else if (eventName === 'done') onEvent({ type: 'done', ...d } as SSESearchEvent)
       else if (eventName === 'error') onEvent({ type: 'error', ...d } as SSESearchEvent)
     },
     onError
   )
-}
-
-export function openRankStream(
-  sessionId: string,
-  onEvent: (event: SSERankEvent) => void,
-  onError?: (err: Error) => void
-): () => void {
-  return openSSEStream(
-    `${API_BASE_URL}/onboarding/rank-stream/${sessionId}`,
-    (eventName, data) => {
-      const d = data as Record<string, unknown>
-      if (eventName === 'phase') onEvent({ type: 'phase', ...d } as SSERankEvent)
-      else if (eventName === 'job_ranked') onEvent({ type: 'job_ranked', data: data as RankedJobResult })
-      else if (eventName === 'done') onEvent({ type: 'done', ...d } as SSERankEvent)
-      else if (eventName === 'error') onEvent({ type: 'error', ...d } as SSERankEvent)
-    },
-    onError
-  )
-}
 }

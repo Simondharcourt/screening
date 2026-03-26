@@ -4,6 +4,7 @@ from app.services.scraper_service import WTTJScraper
 from app.services.ft_scraper_service import FrancetravailScraper
 from app.services.job_service import JobService
 from app.services.skill_extractor import extract_skills_from_profile
+from app.schemas.jobs import JobPostingCreate
 
 logger = logging.getLogger(__name__)
 

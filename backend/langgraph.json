@@ -1,0 +1,9 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "job_description": "app.agents.job_description_agent:job_description_agent",
+    "profile_conversation": "app.graphs_studio:profile_conversation_graph",
+    "job_discovery": "app.graphs_studio:job_discovery_graph"
+  },
+  "env": ".env"
+}

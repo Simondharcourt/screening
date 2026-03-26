@@ -24,13 +24,18 @@ dependencies = [
     "python-multipart>=0.0.22",
     "pypdf>=6.9.1",
     "langfuse>=4.0.1",
+    "langgraph-checkpoint-redis>=0.4.0",
 ]
 
 [dependency-groups]
 dev = [
     "curl-cffi>=0.14.0",
     "envguardx>=0.2.0",
+    "langgraph-api>=0.7.88",
+    "langgraph-cli>=0.4.19",
     "patchright>=1.58.2",
     "playwright>=1.58.0",
+    "pytest>=9.0.2",
+    "ruff>=0.15.7",
     "scrapling[all]>=0.2.0",
 ]

@@ -1,9 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useOnboardingStream, type Phase } from '../../hooks/useOnboardingStream'
 import { CvUploadZone } from '../../components/onboarding/CvUploadZone'
 import { ProfilePanel } from '../../components/onboarding/ProfilePanel'
-import { QuestionsPanel } from '../../components/onboarding/QuestionsPanel'
+import { QuestionCard } from '../../components/onboarding/QuestionCard'
 import { JobsCounter } from '../../components/onboarding/JobsCounter'
 import { RankedJobCard } from '../../components/onboarding/RankedJobCard'
 
@@ -32,15 +32,25 @@ const PHASE_TITLES: Record<Phase, string> = {
 }
 
 function CandidateOnboarding() {
-  const { state, uploadCv, submitAnswers, startRanking, cleanup } = useOnboardingStream()
+  const { state, uploadCv, submitAnswer, skipOnboarding, cleanup } = useOnboardingStream()
   
   useEffect(() => {
     return () => cleanup()
   }, [cleanup])
 
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmitAnswer = async (answer: string) => {
+    setIsSubmitting(true)
+    try {
+      await submitAnswer(answer)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const gradient = PHASE_GRADIENTS[state.phase]
   const showCounter = state.jobsTotal > 0
-  const showStartRankingCta = state.phase === 'answering' && state.questions.length === 0
 
   return (
     <div className={`min-h-[calc(100vh-64px)] w-full bg-gradient-to-br ${gradient} transition-all duration-[1500ms] ease-in-out relative flex flex-col`}>
@@ -78,16 +88,19 @@ function CandidateOnboarding() {
           </div>
         )}
 
-        {/* Phase 1→2 — Profile + Questions */}
+        {/* Phase 1→2 — Profile + Question */}
         {state.profile && !['ranking', 'results'].includes(state.phase) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 items-stretch animate-slide-up">
-            <div className="h-full">
-              <ProfilePanel profile={state.profile} />
-            </div>
-            {state.questions.length > 0 && (
-              <div className="h-full">
-                <QuestionsPanel questions={state.questions} onSubmit={submitAnswers} />
-              </div>
+            <ProfilePanel profile={state.profile} />
+            {state.currentQuestion && (
+              <QuestionCard
+                key={state.currentQuestion}
+                question={state.currentQuestion}
+                completionScore={state.completionScore}
+                onSubmit={handleSubmitAnswer}
+                onSkip={skipOnboarding}
+                isLoading={isSubmitting}
+              />
             )}
           </div>
         )}
@@ -99,21 +112,6 @@ function CandidateOnboarding() {
             sources={state.jobSources}
             isSearching={state.phase === 'searching'}
           />
-        )}
-
-        {/* CTA: start ranking */}
-        {showStartRankingCta && (
-          <div className="text-center mt-8 animate-fade-in">
-            <button
-              onClick={startRanking}
-              className="px-10 py-5 bg-white text-orange-600 font-extrabold rounded-2xl text-xl shadow-[0_20px_40px_rgba(0,0,0,0.2)] hover:shadow-[0_25px_50px_rgba(0,0,0,0.3)] hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer flex items-center justify-center gap-3 mx-auto"
-            >
-              Voir mes {state.jobsTotal} offres personnalisées 
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
-            </button>
-          </div>
         )}
 
         {/* Phase 3 — Ranked jobs */}
