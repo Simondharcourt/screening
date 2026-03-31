@@ -2,8 +2,9 @@ import json
 import asyncio
 import logging
 import uuid
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
+from app.core.auth import AuthUser, get_current_user
 from typing import Any
 from pydantic import BaseModel
 from app.core.config import settings
@@ -144,6 +145,20 @@ async def get_profile(session_id: str):
         raise HTTPException(status_code=404, detail="Profile not found")
     return resp.data["profile"]
 
+@router.post("/claim/{session_id}")
+async def claim_session(session_id: str, user: AuthUser = Depends(get_current_user)):
+    """Lie une session d'onboarding anonyme à un compte auth."""
+    resp = supabase.table("candidates").select("id,user_id").eq("id", session_id).maybe_single().execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Session not found")
+    existing_uid = resp.data.get("user_id")
+    if existing_uid and existing_uid != user.id:
+        raise HTTPException(status_code=403, detail="Session already claimed")
+        
+    supabase.table("candidates").update({"user_id": user.id}).eq("id", session_id).execute()
+    # Ensure user exists in public.users (though trigger does it, this is a safe fallback or not needed if trigger is there)
+    return {"claimed": True}
+        
 
 class ProfilePatch(BaseModel):
     updates: dict[str, Any]
@@ -169,7 +184,7 @@ async def patch_profile(session_id: str, body: ProfilePatch):
 
 # ── Endpoint 5: Search stream (SSE) ──────────────────────────────────────────
 
-async def _generate_discovery_stream(session_id: str):
+async def _generate_discovery_stream(session_id: str, request: Request):
     """
     Unified SSE stream: parallel search → JIT enrichment → LLM reranking.
     Emits: phase, jobs_found, search_done, job_ranked, done.
@@ -225,6 +240,10 @@ async def _generate_discovery_stream(session_id: str):
 
     rank = 0
     for job in state["enriched_jobs"]:
+        if await request.is_disconnected():
+            logger.info(f"[discovery-stream] Client disconnected from session {session_id}")
+            break
+            
         try:
             result: RankedJob = await asyncio.to_thread(_ranking_chain.invoke, {
                 "profile": profile_text,
@@ -254,10 +273,10 @@ async def _generate_discovery_stream(session_id: str):
 
 
 @router.get("/search-stream/{session_id}")
-async def search_stream(session_id: str):
+async def search_stream(session_id: str, request: Request):
     """Unified SSE: parallel search → JIT enrichment → LLM reranking."""
     return StreamingResponse(
-        _generate_discovery_stream(session_id),
+        _generate_discovery_stream(session_id, request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

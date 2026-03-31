@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { candidateMeApi } from '../../api/candidateMe'
 import { ArrowRight, User, Mail, Sparkles, Lock } from 'lucide-react'
 
 export const Route = createFileRoute('/jobs/$jobId/apply')({
@@ -119,8 +120,15 @@ function CandidateApplicationForm() {
       // Store the specific screening ID so the Chat knows which thread to load
       localStorage.setItem('coach_session_id', screeningId)
 
-      // Application success ! Redirect to AI Coach
-      navigate({ to: '/candidate/coach' })
+      // Application success ! 
+      // Claim the session formally in backend
+      try {
+        await candidateMeApi.claimSession(screeningId)
+      } catch (err: any) {
+        console.warn("Could not claim via API (maybe trigger handled it):", err)
+      }
+
+      navigate({ to: '/candidate/dashboard' })
 
     } catch (err: any) {
       console.error(err)

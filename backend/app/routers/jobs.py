@@ -6,11 +6,12 @@ from app.schemas.ai import JobGenerateRequest, JobGenerateResponse
 from app.services.job_service import JobService
 from app.agents.job_description_agent import job_description_agent
 from app.worker.tasks import fetch_wttj_jobs, fetch_francetravail_jobs
+from app.core.auth import AuthUser, get_current_recruiter
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
 @router.post("/generate", response_model=JobGenerateResponse)
-async def generate_job_description(request: JobGenerateRequest):
+async def generate_job_description(request: JobGenerateRequest, user: AuthUser = Depends(get_current_recruiter)):
     try:
         # The agent returns the final state dict
         result = job_description_agent.invoke({
@@ -25,8 +26,8 @@ async def generate_job_description(request: JobGenerateRequest):
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @router.post("/", response_model=JobPostingResponse)
-async def create_job(job: JobPostingCreate):
-    # In a real app, recruiter_id would come from the verified token
+async def create_job(job: JobPostingCreate, user: AuthUser = Depends(get_current_recruiter)):
+    job.recruiter_id = user.id
     result = JobService.create_job(job)
     if not result:
         raise HTTPException(status_code=400, detail="Could not create job posting")
@@ -45,7 +46,7 @@ async def get_job(job_id: str):
     return result
 
 @router.put("/{job_id}", response_model=JobPostingResponse)
-async def update_job(job_id: str, job: JobPostingUpdate):
+async def update_job(job_id: str, job: JobPostingUpdate, user: AuthUser = Depends(get_current_recruiter)):
     result = JobService.update_job(job_id, job)
     if not result:
         raise HTTPException(status_code=400, detail="Could not update job")
@@ -62,7 +63,7 @@ class FranceTravailScrapeRequest(BaseModel):
     nb_results: int = 50       # Max 150
 
 @router.post("/scrape/wttj", tags=["Scraping"])
-async def scrape_wttj(params: WTTJScrapeRequest = WTTJScrapeRequest()):
+async def scrape_wttj(params: WTTJScrapeRequest = WTTJScrapeRequest(), user: AuthUser = Depends(get_current_recruiter)):
     """
     Scrape Welcome to the Jungle via Algolia (full job content, no ScrapingBee needed).
     - query: mot-clé (ex: 'react', 'data engineer', 'product manager')
@@ -72,7 +73,7 @@ async def scrape_wttj(params: WTTJScrapeRequest = WTTJScrapeRequest()):
     return {"message": "WTTJ scraping task queued", "task_id": task.id, "query": params.query, "nb_pages": params.nb_pages}
 
 @router.post("/scrape/francetravail", tags=["Scraping"])
-async def scrape_francetravail(params: FranceTravailScrapeRequest = FranceTravailScrapeRequest()):
+async def scrape_francetravail(params: FranceTravailScrapeRequest = FranceTravailScrapeRequest(), user: AuthUser = Depends(get_current_recruiter)):
     """
     Scrape France Travail via leur API officielle (OAuth2).
     - keywords: mots-clés (ex: 'python django', 'data scientist')

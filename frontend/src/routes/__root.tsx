@@ -11,16 +11,30 @@ export const Route = createRootRoute({
 function RootComponent() {
     const navigate = useNavigate()
     const [session, setSession] = useState<any>(null)
+    const [userRole, setUserRole] = useState<'recruiter' | 'candidate' | null>(null)
 
     useEffect(() => {
+        const fetchRole = async (userId: string) => {
+            const { data } = await supabase.from('users').select('role').eq('id', userId).single()
+            if (data) {
+                setUserRole(data.role)
+            }
+        }
+
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session)
+            if (session?.user?.id) fetchRole(session.user.id)
         })
 
         const {
             data: { subscription },
         } = supabase.auth.onAuthStateChange((_event, session) => {
             setSession(session)
+            if (session?.user?.id) {
+                fetchRole(session.user.id)
+            } else {
+                setUserRole(null)
+            }
         })
 
         return () => subscription.unsubscribe()
@@ -48,13 +62,24 @@ function RootComponent() {
                     <nav className="flex space-x-2 items-center">
                         {session ? (
                             <>
-                                <Link
-                                    to="/dashboard"
-                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
-                                >
-                                    <LayoutDashboard className="w-4 h-4" />
-                                    <span>Dashboard</span>
-                                </Link>
+                                {userRole === 'recruiter' && (
+                                  <Link
+                                      to="/dashboard"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                                  >
+                                      <LayoutDashboard className="w-4 h-4" />
+                                      <span>Dashboard Recruteur</span>
+                                  </Link>
+                                )}
+                                {userRole === 'candidate' && (
+                                  <Link
+                                      to="/candidate/dashboard"
+                                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                                  >
+                                      <LayoutDashboard className="w-4 h-4" />
+                                      <span>Mes candidatures</span>
+                                  </Link>
+                                )}
                                 <div className="h-5 w-px bg-gray-200 mx-2 hidden sm:block"></div>
                                 <button
                                     onClick={handleLogout}

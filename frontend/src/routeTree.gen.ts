@@ -15,6 +15,8 @@ import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as JobsNewRouteImport } from './routes/jobs/new'
 import { Route as JobsJobIdRouteImport } from './routes/jobs/$jobId'
 import { Route as CandidateOnboardingRouteImport } from './routes/candidate/onboarding'
+import { Route as CandidateLoginRouteImport } from './routes/candidate/login'
+import { Route as CandidateDashboardRouteImport } from './routes/candidate/dashboard'
 import { Route as CandidateCoachRouteImport } from './routes/candidate/coach'
 import { Route as JobsJobIdApplyRouteImport } from './routes/jobs/$jobId.apply'
 
@@ -48,6 +50,16 @@ const CandidateOnboardingRoute = CandidateOnboardingRouteImport.update({
   path: '/candidate/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CandidateLoginRoute = CandidateLoginRouteImport.update({
+  id: '/candidate/login',
+  path: '/candidate/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CandidateDashboardRoute = CandidateDashboardRouteImport.update({
+  id: '/candidate/dashboard',
+  path: '/candidate/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CandidateCoachRoute = CandidateCoachRouteImport.update({
   id: '/candidate/coach',
   path: '/candidate/coach',
@@ -63,6 +75,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/candidate/coach': typeof CandidateCoachRoute
+  '/candidate/dashboard': typeof CandidateDashboardRoute
+  '/candidate/login': typeof CandidateLoginRoute
   '/candidate/onboarding': typeof CandidateOnboardingRoute
   '/jobs/$jobId': typeof JobsJobIdRouteWithChildren
   '/jobs/new': typeof JobsNewRoute
@@ -73,6 +87,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/candidate/coach': typeof CandidateCoachRoute
+  '/candidate/dashboard': typeof CandidateDashboardRoute
+  '/candidate/login': typeof CandidateLoginRoute
   '/candidate/onboarding': typeof CandidateOnboardingRoute
   '/jobs/$jobId': typeof JobsJobIdRouteWithChildren
   '/jobs/new': typeof JobsNewRoute
@@ -84,6 +100,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/candidate/coach': typeof CandidateCoachRoute
+  '/candidate/dashboard': typeof CandidateDashboardRoute
+  '/candidate/login': typeof CandidateLoginRoute
   '/candidate/onboarding': typeof CandidateOnboardingRoute
   '/jobs/$jobId': typeof JobsJobIdRouteWithChildren
   '/jobs/new': typeof JobsNewRoute
@@ -96,6 +114,8 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/candidate/coach'
+    | '/candidate/dashboard'
+    | '/candidate/login'
     | '/candidate/onboarding'
     | '/jobs/$jobId'
     | '/jobs/new'
@@ -106,6 +126,8 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/candidate/coach'
+    | '/candidate/dashboard'
+    | '/candidate/login'
     | '/candidate/onboarding'
     | '/jobs/$jobId'
     | '/jobs/new'
@@ -116,6 +138,8 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/candidate/coach'
+    | '/candidate/dashboard'
+    | '/candidate/login'
     | '/candidate/onboarding'
     | '/jobs/$jobId'
     | '/jobs/new'
@@ -127,6 +151,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
   CandidateCoachRoute: typeof CandidateCoachRoute
+  CandidateDashboardRoute: typeof CandidateDashboardRoute
+  CandidateLoginRoute: typeof CandidateLoginRoute
   CandidateOnboardingRoute: typeof CandidateOnboardingRoute
   JobsJobIdRoute: typeof JobsJobIdRouteWithChildren
   JobsNewRoute: typeof JobsNewRoute
@@ -177,6 +203,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CandidateOnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/candidate/login': {
+      id: '/candidate/login'
+      path: '/candidate/login'
+      fullPath: '/candidate/login'
+      preLoaderRoute: typeof CandidateLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/candidate/dashboard': {
+      id: '/candidate/dashboard'
+      path: '/candidate/dashboard'
+      fullPath: '/candidate/dashboard'
+      preLoaderRoute: typeof CandidateDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/candidate/coach': {
       id: '/candidate/coach'
       path: '/candidate/coach'
@@ -210,6 +250,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
   CandidateCoachRoute: CandidateCoachRoute,
+  CandidateDashboardRoute: CandidateDashboardRoute,
+  CandidateLoginRoute: CandidateLoginRoute,
   CandidateOnboardingRoute: CandidateOnboardingRoute,
   JobsJobIdRoute: JobsJobIdRouteWithChildren,
   JobsNewRoute: JobsNewRoute,

@@ -3,6 +3,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langfuse import observe
 from app.core.llm import get_llm
 from app.schemas.candidate import CandidateProfile, compute_completion_score
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

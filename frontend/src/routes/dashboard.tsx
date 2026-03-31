@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
+import { supabase } from '../lib/supabase'
 import { useQuery } from '@tanstack/react-query'
 import { jobsApi } from '../api/jobs'
 import { Button } from '../components/ui/Button'
@@ -7,6 +8,10 @@ import { Badge } from '../components/ui/Badge'
 import { Plus, Briefcase, ChevronRight, Clock } from 'lucide-react'
 
 export const Route = createFileRoute('/dashboard')({
+    beforeLoad: async () => {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) throw redirect({ to: '/' })
+    },
     component: Dashboard,
 })
 
@@ -81,7 +86,7 @@ function Dashboard() {
             {jobs && jobs.length > 0 && (
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {jobs.map((job) => (
-                        <Link key={job.id} to={`/jobs/${job.id}`} className="group block focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 rounded-xl">
+                        <Link key={job.id} to='/jobs/$jobId' params={{ jobId: job.id }} className="group block focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 rounded-xl">
                             <Card className="h-full flex flex-col hover:shadow-lg transition-all duration-200 group-hover:border-primary-200 relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-primary-500 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity" />
                                 <div className="p-6 flex-1 flex flex-col">

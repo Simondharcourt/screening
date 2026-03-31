@@ -41,7 +41,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-from app.routers import jobs, candidates, chat, matching, vapi, onboarding
+from app.routers import jobs, candidates, chat, matching, vapi, onboarding, candidate_me
 
 @app.get("/")
 async def root():
@@ -53,6 +53,7 @@ app.include_router(chat.router)
 app.include_router(matching.router)
 app.include_router(vapi.router)
 app.include_router(onboarding.router)
+app.include_router(candidate_me.router)
 
 @app.get("/health")
 async def health_check():

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Depends
+from app.core.auth import AuthUser, get_current_recruiter
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from app.services.vapi_service import VapiService
@@ -14,7 +15,7 @@ class CallTriggerRequest(BaseModel):
     phone_number: str
 
 @router.post("/screenings/{screening_id}/call")
-async def trigger_screening_call(screening_id: str, request: CallTriggerRequest):
+async def trigger_screening_call(screening_id: str, request: CallTriggerRequest, user: AuthUser = Depends(get_current_recruiter)):
     """
     Manually trigger an outbound call to a candidate.
     """

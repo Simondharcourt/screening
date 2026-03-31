@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from typing import List, Optional
+from app.core.auth import AuthUser, get_current_recruiter
 from app.schemas.candidates import CandidateCreate, CandidateResponse, CandidateWithScreening
 from app.services.candidate_service import CandidateService
 from app.worker.tasks import enrich_jobs_for_candidate
@@ -15,7 +16,8 @@ async def create_candidate(
     email: str = Form(...),
     phone: Optional[str] = Form(None),
     profile_text: Optional[str] = Form(None),
-    cv: Optional[UploadFile] = File(None)
+    cv: Optional[UploadFile] = File(None),
+    user: AuthUser = Depends(get_current_recruiter)
 ):
     try:
         # Create candidate structure
@@ -49,7 +51,7 @@ async def create_candidate(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/by-job/{job_id}")
-async def get_candidates_for_job(job_id: str):
+async def get_candidates_for_job(job_id: str, user: AuthUser = Depends(get_current_recruiter)):
     try:
          results = CandidateService.get_candidates_for_job(job_id)
          
