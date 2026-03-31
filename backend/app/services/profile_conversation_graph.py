@@ -3,12 +3,11 @@ from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
 from langgraph.checkpoint.redis import RedisSaver
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
+from app.core.llm import get_llm_fast
 from pydantic import BaseModel, Field, ValidationError
 from langfuse import observe
 
-from app.core.config import settings
 from app.core.database import supabase
 from app.schemas.candidate import (
     CandidateProfile, INFO_GRID, QUESTION_CONFIG, compute_completion_score
@@ -64,8 +63,7 @@ def gap_analyzer_node(state: ProfileConversationState) -> dict:
         return {"is_complete": True, "current_question": None}
 
     # Ask LLM to pick the most relevant next question given context
-    llm = ChatAnthropic(model=settings.LLM_MODEL_FAST, temperature=0, max_tokens=256,
-                        api_key=settings.ANTHROPIC_API_KEY)
+    llm = get_llm_fast(max_tokens=256)
     structured_llm = llm.with_structured_output(GapAnalysisResult)
 
     missing_summary = "\n".join(
@@ -114,8 +112,7 @@ def answer_processor_node(state: ProfileConversationState) -> dict:
 
     profile = CandidateProfile.model_validate(state["profile"])
 
-    llm = ChatAnthropic(model=settings.LLM_MODEL_FAST, temperature=0, max_tokens=512,
-                        api_key=settings.ANTHROPIC_API_KEY)
+    llm = get_llm_fast(max_tokens=512)
     structured_llm = llm.with_structured_output(AnswerProcessorResult)
 
     prompt = ChatPromptTemplate.from_messages([

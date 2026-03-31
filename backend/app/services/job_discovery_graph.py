@@ -4,8 +4,8 @@ import operator
 
 from langgraph.graph import StateGraph, END
 from langgraph.types import Send
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
+from app.core.llm import get_llm_fast
 from pydantic import BaseModel, Field
 from langfuse import observe
 
@@ -189,12 +189,7 @@ def llm_rerank_node(state: JobDiscoveryState) -> dict:
         f"Résumé: {profile.summary}"
     )
 
-    llm = ChatAnthropic(
-        model=settings.LLM_MODEL_FAST,
-        temperature=0,
-        max_tokens=512,
-        api_key=settings.ANTHROPIC_API_KEY,
-    )
+    llm = get_llm_fast(max_tokens=512)
     structured_llm = llm.with_structured_output(RankedJob)
     prompt = ChatPromptTemplate.from_messages([
         ("system", "Tu es un expert RH. Évalue la compatibilité entre ce candidat et cette offre. Score de 0 à 100."),

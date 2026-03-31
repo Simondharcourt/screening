@@ -1,8 +1,7 @@
 import logging
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from langfuse import observe
-from app.core.config import settings
+from app.core.llm import get_llm
 from app.schemas.candidate import CandidateProfile, compute_completion_score
 
 logger = logging.getLogger(__name__)
@@ -15,12 +14,7 @@ def analyze_cv(cv_text: str) -> CandidateProfile:
     Only fills fields confidently derivable from the CV — leaves the rest None.
     """
     try:
-        llm = ChatAnthropic(
-            model=settings.LLM_MODEL,
-            temperature=0,
-            max_tokens=1024,
-            api_key=settings.ANTHROPIC_API_KEY
-        )
+        llm = get_llm(max_tokens=1024)
         structured_llm = llm.with_structured_output(CandidateProfile)
 
         prompt = ChatPromptTemplate.from_messages([

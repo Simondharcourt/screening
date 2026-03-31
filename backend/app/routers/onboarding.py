@@ -11,8 +11,8 @@ from app.core.database import supabase
 from app.services.cv_parser_service import extract_text_from_pdf
 from app.services.profile_analyzer_service import analyze_cv
 from app.schemas.candidate import CandidateProfile, compute_completion_score
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
+from app.core.llm import get_llm_fast
 from langgraph.types import Command
 from app.services.profile_conversation_graph import build_profile_graph
 from app.services.job_discovery_graph import (
@@ -33,16 +33,10 @@ router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 _profile_graph, _checkpointer = build_profile_graph(settings.REDIS_URL)
 
 # Reranking chain singleton — shared across all SSE connections
-_ranking_llm = ChatAnthropic(
-    model=settings.LLM_MODEL_FAST,
-    temperature=0,
-    max_tokens=512,
-    api_key=settings.ANTHROPIC_API_KEY,
-)
 _ranking_chain = ChatPromptTemplate.from_messages([
     ("system", "Tu es un expert RH. Évalue la compatibilité entre ce candidat et cette offre. Score de 0 à 100."),
     ("human", "Profil:\n{profile}\n\nOffre ({title}):\n{description}\n\nÉvalue la compatibilité."),
-]) | _ranking_llm.with_structured_output(RankedJob)
+]) | get_llm_fast(max_tokens=512).with_structured_output(RankedJob)
 
 
 # ── Endpoint 1: Upload CV ─────────────────────────────────────────────────────

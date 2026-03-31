@@ -1,10 +1,10 @@
 import logging
 from typing import List
 from pydantic import BaseModel, Field
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from langfuse import observe
 from app.core.config import settings
+from app.core.llm import get_llm
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def extract_skills_from_profile(profile_text: str) -> List[str]:
         return ["developpeur"]
 
     try:
-        llm = ChatAnthropic(model=settings.LLM_MODEL, temperature=0, max_tokens=256, api_key=settings.ANTHROPIC_API_KEY)
+        llm = get_llm(max_tokens=256)
         structured_llm = llm.with_structured_output(CandidateSkills)
 
         prompt = ChatPromptTemplate.from_messages([
