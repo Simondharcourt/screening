@@ -10,3 +10,10 @@ backend/package-lock.json
 backend/skills-lock.json
 backend/nb/
 *.rdb
+
+# Agent tooling (skills installed locally — restore with: npx skills experimental_install)
+.agents/
+skills/
+.claude/
+.vibe/
+.windsurf/
